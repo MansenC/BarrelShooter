@@ -6,23 +6,80 @@
  */
 public class Environment
 {
+  /**
+   * The size of the ocean's far plane.
+   */
   private static final int OCEAN_FAR_SIZE = 250_000;
+  
+  /**
+   * The size of the skybox that contains clouds.
+   */
   private static final int SKYBOX_NEAR_SIZE = 250_000;
+  
+  /**
+   * The height of the skybox that contains clouds.
+   */
   private static final int SKYBOX_NEAR_HEIGHT = 100_000;
+  
+  /**
+   * The size of the skybox backdrop.
+   */
   private static final int SKYBOX_FAR_SIZE = 500_000;
+  
+  /**
+   * The height of the skybox backdrop.
+   */
   private static final int SKYBOX_FAR_HEIGHT = 5_000_000;
   
+  /**
+   * A constant used in calculating the center point distance of a given hexagon.
+   */
   private final float UNIT_HEXAGON_CENTER_DISTANCE = sqrt(3) / 2f;
   
+  /**
+   * The detailed mesh for the near plane ocean.
+   */
   private final PShape oceanMesh;
+  
+  /**
+   * The shader for the near plane ocean.
+   */
   private final PShader oceanNearShader;
+  
+  /**
+   * The shader for the far plane ocean.
+   */
   private final PShader oceanFarShader;
+  
+  /**
+   * The shader for foliage, discards pixels that contain too high of an alpha.
+   * This is far easier than any depth-sorting or other transparency shenanigans.
+   */
   private final PShader alphaBlendingShader;
+  
+  /**
+   * The flow map for the ocean near plane. Dictates foam distortion.
+   */
   private final PImage flowMap;
+  
+  /**
+   * The voronoi map that gives shape to the ocean's foam.
+   */
   private final PImage oceanVoronoi;
+  
+  /**
+   * The clouds for the skybox.
+   */
   private final PImage skyboxImage;
   
+  /**
+   * The island model.
+   */
   private final PShape island;
+  
+  /**
+   * The island's foliage.
+   */
   private final PShape islandFoliage;
   
   /**
@@ -109,6 +166,7 @@ public class Environment
     
     beginShape();
     
+    // Render the ocean far plane
     vertex(-OCEAN_FAR_SIZE, 0, -OCEAN_FAR_SIZE, 0, 0);
     vertex(-OCEAN_FAR_SIZE, 0, OCEAN_FAR_SIZE, 0, 1);
     vertex(OCEAN_FAR_SIZE, 0, OCEAN_FAR_SIZE, 1, 1);
@@ -128,12 +186,17 @@ public class Environment
     translate(0, 2000, 0);
     scale(10_000);
     
+    // Render the ocean near plane
     shape(oceanMesh);
     
     popMatrix();
     resetShader();
   }
   
+  /**
+   * Renders the model of the island. Foliage and island itself are separated
+   * due to transparency requiring a different shader.
+   */
   private void renderIsland()
   {
     pushMatrix();

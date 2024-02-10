@@ -132,6 +132,7 @@ public class Cannon
     {
       handleUserInput();
       
+      // Set the camera to a fixed point and rotate it with the cannon.
       camera.setPitch(25);
       camera.setPosition(
         modelX(-200, 400, 0),
@@ -144,6 +145,10 @@ public class Cannon
     drawGUI();
   }
   
+  /**
+   * Handles the user's input for controlling the cannon. W turns the cannon up, S down,
+   * A turns left, D turns right and left click shoots the cannon.
+   */
   private void handleUserInput()
   {
     if (isKeyDown('w'))
@@ -158,6 +163,11 @@ public class Cannon
     cannonVerticalRotation = constrain(cannonVerticalRotation, CANNON_MIN_VERTICAL_ANGLE, CANNON_MAX_VERTICAL_ANGLE);
   }
   
+  /**
+   * Draws the GUI for the cannon game. The GUI includes indicators about how many shots remain,
+   * how many barrels have been destroyed and the current angle of the cannon. Will not draw in freecam mode.
+   * The GUI uses the camera's {@link Camera#applyGUITransformations} method in order to draw properly.
+   */
   private void drawGUI()
   {
     if (camera.isFreecam())
@@ -165,6 +175,8 @@ public class Cannon
       return;
     }
     
+    // We disable depth testing and shading so that we always draw
+    // fully lit and on top.
     hint(DISABLE_DEPTH_TEST);
     noLights();
     
@@ -219,6 +231,7 @@ public class Cannon
     
     popMatrix();
     
+    // Finally we draw the cover.
     drawUIImage(
       cannonBase,
       width - (width / 10f) - (height / 20f) + ((1f / 4f) * height / 7f),
@@ -231,11 +244,22 @@ public class Cannon
     environment.restoreLights();
   }
   
+  /**
+   * Draws a basic image to the UI, given the image to draw, the x and y coordinates and the width/height
+   * of the image.
+   *
+   * @param image The image to display.
+   * @param x The top left x coordinate.
+   * @param y The top left y coordinate.
+   * @param width The targeted width.
+   * @param height The targeted height.
+   */
   private void drawUIImage(PImage image, float x, float y, float width, float height)
   {
     beginShape();
     texture(image);
     
+    // Just a 3D quad width the given parameters.
     vertex(x, y, 0, 0);
     vertex(x + width, y, 1, 0);
     vertex(x + width, y + height, 1, 1);
