@@ -25,7 +25,7 @@ vec3 normalFromTexture(sampler2D texture, vec2 uv, float offset, float strength)
 void main() {
   const vec4 waterColor = vec4(53.0 / 255.0, 164.0 / 255.0, 255.0 / 255.0, 1);
   const vec4 lightFoamColor = vec4(1, 1, 1, 1);
-  const vec4 darkFoamColor = vec4(46.0 / 255.0, 143.0 / 255.0, 222.0 / 255.0, 1);
+  const vec4 darkFoamColor = vec4(42.0 / 255.0, 153.0 / 255.0, 245.0 / 255.0, 1);
   
   const float foamDistance = 1;
   const float flowSpeed = 0.01;
@@ -38,7 +38,7 @@ void main() {
   
   // Sample the form voronoi image
   vec2 uvNormals = (uvCoordinates + flowNormals.xy) * size.xx;
-  vec2 offsetUVNormals = uvNormals + vec2(0.1, 0.1);
+  vec2 offsetUVNormals = uvNormals + vec2(0.15, 0.15);
   vec4 offsetVoronoi = texture2D(foamTexture, offsetUVNormals);
   vec4 offsetVoronoiColor = mix(waterColor, darkFoamColor, offsetVoronoi);
   

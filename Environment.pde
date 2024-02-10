@@ -1,6 +1,8 @@
 /**
  * The class Environment handles everything regarding the world.
  * This includes the skybox, ocean and island the player is on.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
  */
 public class Environment
 {
@@ -42,6 +44,17 @@ public class Environment
   }
   
   /**
+   * Restores the global lighting configuration.
+   */
+  public void restoreLights()
+  {
+    ambientLight(32, 32, 32);
+    directionalLight(255, 255, 255, 1, 2, 0);
+    lightFalloff(1, 0, 0);
+    lightSpecular(0, 0, 0);
+  }
+  
+  /**
    * Note on the name: I personally find "update" more appropriate than draw. I don't quite get why processing only supports
    * a draw function since you have to do everything in there, including a lot of state or physics updating which just feels wrong.
    */
@@ -51,10 +64,7 @@ public class Environment
     noLights();
     renderSkybox();
     
-    ambientLight(32, 32, 32);
-    directionalLight(255, 255, 255, 1, 2, 0);
-    lightFalloff(1, 0, 0);
-    lightSpecular(0, 0, 0);
+    restoreLights();
     
     renderOcean();
     renderIsland();

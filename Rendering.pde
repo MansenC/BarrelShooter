@@ -11,11 +11,6 @@ import java.awt.Robot;
 public class Camera
 {
   /**
-   * Whether or not the camera acts as a first-person camera.
-   */
-  private static final boolean IS_DEBUG_CAMERA = true;
-  
-  /**
    * The movement speed of the camera.
    */
   private static final float MOVEMENT_SPEED = 5f;
@@ -51,6 +46,11 @@ public class Camera
    * Whether or not the cursor should be locked to the screen center.
    */
   private boolean cursorLocked = false;
+  
+  /**
+   * Whether or not the camera is in freecam mode, meaning not controlled by an actor.
+   */
+  private boolean freecam = false;
 
   /**
    * Constructs the camera instance with a given starting position. Constructs an AWT robot for mouse locking.
@@ -80,8 +80,76 @@ public class Camera
    *
    * @return The camera position in world space.
    */
-  public PVector getPosition() {
+  public PVector getPosition()
+  {
     return position;
+  }
+  
+  /**
+   * Updates the position to the newly provided one.
+   *
+   * @param x The new camera x position.
+   * @param y The new camera y position.
+   * @param z The new camera z position.
+   */
+  public void setPosition(float x, float y, float z)
+  {
+    this.position.set(x, y, z);
+  }
+  
+  /**
+   * Updates the yaw of the camera.
+   *
+   * @param yaw The new yaw.
+   */
+  public void setYaw(float yaw)
+  {
+    this.yaw = yaw;
+  }
+  
+  /**
+   * Updates the pitch of the camera.
+   *
+   * @param pitch The new pitch.
+   */
+  public void setPitch(float pitch)
+  {
+    this.pitch = pitch;
+  }
+  
+  /**
+   * Whether or not the camera is currently in freecam mode.
+   *
+   * True if the camera is in freecam mode.
+   */
+  public boolean isFreecam()
+  {
+    return freecam;
+  }
+  
+  /**
+   * Applies transformations so that (0|0|0) corresponds to the top-left of the user's screen
+   * and (width|height|0) corresponds to the bottom-right.
+   */
+  public void applyGUITransformations()
+  {
+    // Calculate distance of UI plane based off screen height and FOV-Y.
+    float targetDistance = height / (2 * tan(PI / 6));
+    
+    // Get the look direction, move it to the calculated distance and add the camera position.
+    PVector lookDirection = getLookDirection();
+    lookDirection.mult(targetDistance);
+    lookDirection.add(position);
+    
+    // Now we translate in that direction so we always look at a fixed point where (0|0) is the center of the screen.
+    translate(lookDirection.x, lookDirection.y, lookDirection.z);
+    
+    // We rotate the plane so it matches the camera's rotation.
+    rotateY(-radians(yaw) - PI / 2);
+    rotateX(radians(pitch));
+    
+    // And translate it to the top left so that (0|0) is the top-left corner and (width|height) is bottom-right.
+    translate(-width / 2, -height / 2, 0);
   }
 
   /**
@@ -89,16 +157,26 @@ public class Camera
    */
   public void update()
   {
-    handleLookRotation();
-    handleMovePosition();
+    // If we're in freecam mode then we allow movement however the camera controller wants it.
+    if (freecam)
+    {
+      handleLookRotation();
+      handleMovePosition();
+    }
+    
+    // After we're done with the input, we want to be able to toggle freecam. This means that in the frame
+    // where we toggle freecam we continue with the previously set position/rotation for the camera.
+    
+    // We toggle freecam with ctrl+f. 70 because that's the keyCode of f which gets stored
+    // when ctrl is pressed down as well. The other condition is for the monsters who press
+    // f first and then ctrl.
+    if (isCombinationPressed(CONTROL, 70) || isCombinationPressed(CONTROL, 'f'))
+    {
+      freecam = !freecam;
+    }
     
     // We convert our yaw/pitch into a look-direction on a unit sphere here.
-    float radiansYaw = radians(yaw);
-    float radiansPitch = radians(pitch);
-    PVector lookDirection = new PVector(
-      cos(radiansYaw) * cos(radiansPitch),
-      sin(radiansPitch),
-      sin(radiansYaw) * cos(radiansPitch));
+    PVector lookDirection = getLookDirection();
     
     // We then offset this look-direction by the current position.
     lookDirection.add(position);
@@ -138,6 +216,21 @@ public class Camera
     {
       cursor(ARROW);
     }
+  }
+  
+  /**
+   * Returns the vector of the direction that the camera is currently looking towards. The magnitude of this vector is 1.
+   *
+   * @returns The direction the camera is looking towards.
+   */
+  private PVector getLookDirection()
+  {
+    float radiansYaw = radians(yaw);
+    float radiansPitch = radians(pitch);
+    return new PVector(
+      cos(radiansYaw) * cos(radiansPitch),
+      sin(radiansPitch),
+      sin(radiansYaw) * cos(radiansPitch));
   }
   
   /**
@@ -239,6 +332,13 @@ public class Camera
     robot.mouseMove(displayWidth / 2, displayHeight / 2);
   }
   
+  /**
+   * Checks if the mouse is currently locked. This condition is true when the cursor is requested to be locked,
+   * the application is focused (so we can use the mouse outside the window if unfocused) and if the robot
+   * is set, otherwise locked does not work.
+   *
+   * @returns Whether or not the cursor is currently locked.
+   */
   private boolean isLocked()
   {
     return cursorLocked && focused && robot != null;
