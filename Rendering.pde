@@ -13,7 +13,7 @@ public class Camera
   /**
    * The movement speed of the camera.
    */
-  private static final float MOVEMENT_SPEED = 5f;
+  private static final float MOVEMENT_SPEED = 10f;
   
   /**
    * The sensitivity factor. Increase this value for a <b>lower</b> sensitivity
@@ -301,6 +301,11 @@ public class Camera
     else if (isKeyDown(SHIFT))
     {
       position.add(new PVector(0, MOVEMENT_SPEED, 0));
+    }
+    
+    if (isKeyDown('p'))
+    {
+      println(position);
     }
   }
   

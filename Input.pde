@@ -15,7 +15,12 @@ Set<Integer> currentlyPressedKeys = new HashSet<>();
 Set<Integer> framePressedKeys = new HashSet<>();
 
 /**
- * The keyPressed event so that we do not have to rely on the last key being pressed, which results in unintended
+ * A set of all mouse buttons that were pressed down this frame.
+ */
+Set<Integer> framePressedMouseButtons = new HashSet<>();
+
+/**
+ * The keyPressed event listens so that we do not have to rely on the last key being pressed, which results in unintended
  * behavior really quickly.
  */
 void keyPressed()
@@ -27,13 +32,21 @@ void keyPressed()
 }
 
 /**
- * The keyReleased event so that we do not have to rely on the last key being pressed, which results in unintended
+ * The keyReleased event listens so that we do not have to rely on the last key being pressed, which results in unintended
  * behavior really quickly.
  */
 void keyReleased()
 {
   currentlyPressedKeys.remove((int) Character.toLowerCase(key));
   currentlyPressedKeys.remove(keyCode);
+}
+
+/**
+ * The mousePressed event listens so that any mouse button currently pressed gets registered.
+ */
+void mousePressed()
+{
+  framePressedMouseButtons.add(mouseButton);
 }
 
 /**
@@ -74,4 +87,15 @@ boolean isCombinationPressed(int modifier, int expectedKey)
   }
   
   return isKeyPressed(modifier) || isKeyPressed(expectedKey);
+}
+
+/**
+ * This function checks if the given mouse button was pressed down this frame.
+ *
+ * @param expectedButton The button to check against.
+ * @return True if the mouse button was pressed down this frame, false otherwise.
+ */
+boolean isMouseButtonPressed(int expectedButton)
+{
+  return framePressedMouseButtons.contains(expectedButton);
 }

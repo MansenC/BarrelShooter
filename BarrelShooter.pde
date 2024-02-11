@@ -25,6 +25,9 @@ void setup()
   cannon = new Cannon(new PVector(-3000, 1040, 333));
   
   camera.setCursorLocked(true);
+  
+  // Load external global variables :)
+  cannonballShape = loadShape("Cannonball.obj");
 }
 
 /**
@@ -48,6 +51,7 @@ void draw()
   // Lastly we update our camera, process the input and update the position.
   camera.update();
   
-  // Finally we clean up our key data for this frame.
+  // Finally we clean up our key and mouse data for this frame.
   framePressedKeys.clear();
+  framePressedMouseButtons.clear();
 }

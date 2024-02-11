@@ -1,3 +1,6 @@
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * The cannon class handles control of the cannon. This includes rotating the cannon left/right and up/down.
  * This class also sets the camera position if not in freecam mode according to the cannon's position
@@ -9,14 +12,30 @@
 public class Cannon
 {
   /**
+   * The minimum horizontal angle the cannon can shoot at.
+   */
+  private static final float CANNON_MIN_HORIZONTAL_ANGLE = -45;
+  
+  /**
+   * The maximum horizontal angle the cannon can shoot at.
+   */
+  private static final float CANNON_MAX_HORIZONTAL_ANGLE = 45;
+  
+  /**
    * The minimum vertical angle the cannon can shoot at.
    */
-  private static final float CANNON_MIN_VERTICAL_ANGLE = 5;
+  private static final float CANNON_MIN_VERTICAL_ANGLE = -15;
   
   /**
    * The maximum vertical angle the cannon can shoot at.
    */
   private static final float CANNON_MAX_VERTICAL_ANGLE = 85;
+  
+  /**
+   * A list of all cannonballs currently shot. Will update every ball in the list,
+   * and if the ball died, will remove them from the list.
+   */
+  private final List<Cannonball> balls = new ArrayList<Cannonball>();
   
   /**
    * The global position of the cannon.
@@ -74,10 +93,15 @@ public class Cannon
   private final PImage damagedShip;
   
   /**
-   * The current vertical rotation of the cannon barrel. Controls how far the balls will shoot.
-   * In range of [5..85].
+   * The current horizontal rotation of the cannon. In range of [-45..45].
    */
-  private float cannonVerticalRotation = CANNON_MIN_VERTICAL_ANGLE;
+  private float cannonHorizontalRotation = 0;
+  
+  /**
+   * The current vertical rotation of the cannon barrel. Controls how far the balls will shoot.
+   * In range of [-15..85].
+   */
+  private float cannonVerticalRotation = 0;
   
   /**
    * Constructs a new cannon instance at the provided world position.
@@ -110,6 +134,7 @@ public class Cannon
     // We move our cannon to the given position
     translate(position.x, position.y, position.z);
     rotateX(PI);
+    rotateY(radians(cannonHorizontalRotation));
     
     // Only draw the wagon
     shape(cannonWagon);
@@ -126,6 +151,18 @@ public class Cannon
     rotateY(PI);
     shape(cannon);
     
+    // If the left mouse button was pressed then we shoot a cannonball.
+    // We do this here since we don't have to the transformation for spawning
+    // the ball inside the barrel again.
+    if (isMouseButtonPressed(LEFT))
+    {
+      PVector ballSpawnLocation = new PVector(
+        modelX(0, 300, 0),
+        modelY(0, 300, 0),
+        modelZ(0, 300, 0));
+      balls.add(new Cannonball(ballSpawnLocation, cannonHorizontalRotation, cannonVerticalRotation));
+    }
+    
     popMatrix();
     
     if (!camera.isFreecam())
@@ -133,6 +170,7 @@ public class Cannon
       handleUserInput();
       
       // Set the camera to a fixed point and rotate it with the cannon.
+      camera.setYaw(cannonHorizontalRotation);
       camera.setPitch(25);
       camera.setPosition(
         modelX(-200, 400, 0),
@@ -141,6 +179,12 @@ public class Cannon
     }
     
     popMatrix();
+    
+    // We finally update all cannonballs.
+    for (Cannonball ball : balls)
+    {
+      ball.update();
+    }
     
     drawGUI();
   }
@@ -160,7 +204,17 @@ public class Cannon
       cannonVerticalRotation -= deltaTime * 10;
     }
     
+    if (isKeyDown('a'))
+    {
+      cannonHorizontalRotation -= deltaTime * 10;
+    }
+    else if (isKeyDown('d'))
+    {
+      cannonHorizontalRotation += deltaTime * 10;
+    }
+    
     cannonVerticalRotation = constrain(cannonVerticalRotation, CANNON_MIN_VERTICAL_ANGLE, CANNON_MAX_VERTICAL_ANGLE);
+    cannonHorizontalRotation = constrain(cannonHorizontalRotation, CANNON_MIN_HORIZONTAL_ANGLE, CANNON_MAX_HORIZONTAL_ANGLE);
   }
   
   /**
