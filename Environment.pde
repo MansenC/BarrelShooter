@@ -193,6 +193,8 @@ public class Environment
     resetShader();
   }
   
+  PShape measuringStick;
+  
   /**
    * Renders the model of the island. Foliage and island itself are separated
    * due to transparency requiring a different shader.
