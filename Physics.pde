@@ -1,3 +1,127 @@
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+/**
+ * The framerate of physics updates, in this case 50fps. This is the frame
+ * time in milliseconds.
+ */
+public static final float PHYSICS_DELTA = 1f / 50;
+
+/**
+ * We cannot really rely on processing for a consistent framerate, can we. This is
+ * why the physics manager exists, it spins up a new thread that runs at 50FPS and
+ * updates physics according to that framerate, so that no weird behavior occurs
+ * with the framerate.
+ */
+public static class PhysicsManager
+{ 
+  /**
+   * Whether or not the physics are updated or not.
+   */
+  private static volatile boolean running = true;
+  
+  /**
+   * A list of all active rigidbodies that need updating. We cannot use a simple
+   * ArrayList here since the list may get updated during updates to our physics.
+   * This is why we use java's concurrent list type.
+   */
+  private static final List<Rigidbody> RIGIDBODIES = new CopyOnWriteArrayList<>();
+  
+  /**
+   * A private constructor to mark this as a static class (C#-like, not java-like).
+   */
+  private PhysicsManager()
+  {
+    // NOP
+  }
+  
+  /**
+   * Starts a new thread which runs our physics.
+   */
+  public static void start()
+  {
+    // We tell the thread that its method to execute is runPhysics.
+    Thread physicsThread = new Thread(PhysicsManager::runPhysics);
+    
+    // Set a new name to the thread so we can identify it.
+    physicsThread.setName("PhysicsHandler");
+    
+    // Sets the thread as a daemon, meaning when the main thread dies
+    // it dies as well.
+    physicsThread.setDaemon(true);
+    
+    // Actually start the thread.
+    physicsThread.start();
+  }
+  
+  /**
+   * Stops physics execution.
+   */
+  public static void stop()
+  {
+    running = false;
+  }
+  
+  /**
+   * Registers a given rigidbody to the physics engine and will schedule updates.
+   */
+  public static void registerRigidbody(Rigidbody rigidbody)
+  {
+    RIGIDBODIES.add(rigidbody);
+  }
+  
+  /**
+   * Removes a given rigidbody from the physics engine.
+   */
+  public static void removeRigidbody(Rigidbody rigidbody)
+  {
+    RIGIDBODIES.remove(rigidbody);
+  }
+  
+  /**
+   * Executes the physics loop.
+   */
+  private static void runPhysics()
+  {
+    // We store the time before physics execution in order to calculate the exact time we have
+    // to wait.
+    long beforeExecutionTime;
+    while (running)
+    {
+      beforeExecutionTime = System.currentTimeMillis();
+      for (Rigidbody rigidbody : RIGIDBODIES)
+      {
+        rigidbody.update();
+      }
+      
+      // We essentially measure the time it took to update our rigidbodies here.
+      // We then subtract this time from our PHYSICS_DELTA so we can get an accurate measure
+      // on how long we have to wait. If updating took 2ms and we ordinarily wait 20ms then
+      // we now just wait 18ms instead to keep up.
+      long sleepDelta = ((long) (PHYSICS_DELTA * 1000)) - (System.currentTimeMillis() - beforeExecutionTime);
+      if (sleepDelta <= 0)
+      {
+        // If we're running late (i.e. the physics took more than 20ms) then we continue
+        // immediately with the next update.
+        continue;
+      }
+      
+      try
+      {
+        // Actually sleep.
+        Thread.sleep(sleepDelta);
+      }
+      catch (InterruptedException ex)
+      {
+        ex.printStackTrace();
+        
+        // It is good practice to interrupt the running thread if the wait was interrupted.
+        Thread.currentThread().interrupt();
+      }
+    }
+  }
+}
+
 /**
  * Rigidbody docs TODO. Same for Matrix3x4
  */
@@ -9,7 +133,7 @@ public class Rigidbody
   private final PVector position;
   private Quaternion rotation = new Quaternion();
   private final PVector velocity = new PVector();
-  private final PVector acceleration = new PVector();
+  private final PVector constantAcceleration = new PVector();
   private final PVector lastFrameAcceleration = new PVector();
   
   private float inverseMass = 1;
@@ -30,11 +154,22 @@ public class Rigidbody
   {
     this.mesh = mesh;
     this.position = position;
+    
+    PhysicsManager.registerRigidbody(this);
+  }
+  
+  /**
+   * Removes this rigidbody from our physics loop. Without calling this,
+   * the rigidbody will get updated in the background.
+   */
+  public void remove()
+  {
+    PhysicsManager.removeRigidbody(this);
   }
   
   public void setUseGravity()
   {
-      acceleration.add(0, 9.81f, 0);
+      constantAcceleration.add(0, 9.81f, 0);
   }
   
   public void addForce(PVector force)
@@ -66,13 +201,26 @@ public class Rigidbody
     this.kinematic = kinematic;
   }
   
-  public void update()
+  /**
+   * Updates the physics of this given rigidbody. Synchronized because it may overlap
+   * with our calls to {@link #draw()}.
+   */
+  public synchronized void update()
   {
-    if (kinematic)
+    if (!kinematic)
     {
-      applyKinematics();
+      return;
     }
     
+    applyKinematics();
+  }
+  
+  /**
+   * Actually draws the rigidbody on screen. This should be called from processing's core loop.
+   * Synchronized because it may overlap with our calls to {@link #update()}.
+   */
+  public synchronized void draw()
+  {
     // Now we can render our mesh.
     pushMatrix();
     
@@ -94,23 +242,27 @@ public class Rigidbody
   
   private void applyKinematics()
   {
-    // Set the last frame acceleration to the current value of acceleration
-    lastFrameAcceleration.set(acceleration);
+    // Set the last frame acceleration to the current value of acceleration.
+    // Since we know that F=m*a and we apply directional forces to the rigidbodies,
+    // our acceleration is defined as F/m which we apply here after our constant
+    // acceleration.
+    lastFrameAcceleration.set(constantAcceleration);
     lastFrameAcceleration.add(currentForces.mult(inverseMass));
     
     // Now calculate the angular acceleration, apply the acceleration to this frame
     // and then apply the angular acceleration
     PVector angularAcceleration = inverseInertiaTensorWorld.transform(currentTorque);
-    velocity.add(PVector.mult(lastFrameAcceleration, deltaTime * FORCE_SCALE));
-    angularVelocity.add(angularAcceleration.mult(deltaTime * FORCE_SCALE));
+    velocity.add(PVector.mult(lastFrameAcceleration, PHYSICS_DELTA * FORCE_SCALE));
+    
+    angularVelocity.add(angularAcceleration.mult(PHYSICS_DELTA * FORCE_SCALE));
     
     // Calculate the dampened velocities. This is calculating drag.
-    velocity.mult(pow(linearDamping, deltaTime * FORCE_SCALE));
-    angularVelocity.mult(pow(angularDamping, deltaTime * FORCE_SCALE));
+    velocity.mult(pow(linearDamping, PHYSICS_DELTA * FORCE_SCALE));
+    angularVelocity.mult(pow(angularDamping, PHYSICS_DELTA * FORCE_SCALE));
     
     // We then increase or position and rotation according to our calculated values.
-    position.add(PVector.mult(velocity, deltaTime));
-    rotation.addScaledVector(angularVelocity, deltaTime);
+    position.add(PVector.mult(velocity, PHYSICS_DELTA));
+    rotation.addScaledVector(angularVelocity, PHYSICS_DELTA);
     
     // We finally normalize the rotation so it is a valid rotational quaternion again.
     rotation.normalize();

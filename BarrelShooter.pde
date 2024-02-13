@@ -19,6 +19,9 @@ void setup()
   // Anti-aliasing 4x
   smooth(4);
   
+  // Start our physics manager
+  PhysicsManager.start();
+  
   // We initialize everything.
   camera = new Camera(new PVector(-4175, 905, 333));
   environment = new Environment();
@@ -54,4 +57,17 @@ void draw()
   // Finally we clean up our key and mouse data for this frame.
   framePressedKeys.clear();
   framePressedMouseButtons.clear();
+}
+
+/**
+ * This overrides {@link PApplet#exit} in order to listen for a scheduled exit.
+ * With this we can safely stop our {@link PhysicsManager} so that the thread doesn't
+ * continue executing in the background. Technically, the program gets terminated after
+ * here but it feels cleaner to actually shutdown a thread.
+ */
+@Override
+void exit()
+{
+  PhysicsManager.stop();
+  super.exit();
 }
