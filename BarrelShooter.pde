@@ -3,6 +3,7 @@
 Camera camera;
 Environment environment;
 Cannon cannon;
+BarrelManager barrelManager;
 
 int lastFrameMillis;
 float deltaTime;
@@ -26,11 +27,15 @@ void setup()
   camera = new Camera(new PVector(-4175, 905, 333));
   environment = new Environment();
   cannon = new Cannon(new PVector(-3000, 1040, 333));
+  barrelManager = new BarrelManager(new PVector(-3000, 1040, 333));
   
   camera.setCursorLocked(true);
   
   // Load external global variables :)
+  barrelShape = loadShape("Barrel.obj");
   cannonballShape = loadShape("Cannonball.obj");
+  
+  barrelManager.spawnBarrels(10);
 }
 
 /**
@@ -50,6 +55,9 @@ void draw()
   
   // After that we update everything else related to our game and simulation
   cannon.update();
+  
+  // Then it's time for the barrels
+  barrelManager.update();
   
   // Lastly we update our camera, process the input and update the position.
   camera.update();

@@ -127,6 +127,11 @@ public static class PhysicsManager
  */
 public class Rigidbody
 {
+  /**
+   * It should be noted that everything is this world is scaled up by 100x since processing's
+   * camera settings are super weird and I didn't get it right initially. This is why the physics
+   * are scaled up by a margin of 100 as well.
+   */
   public static final float FORCE_SCALE = 100f;
   
   private final PShape mesh;

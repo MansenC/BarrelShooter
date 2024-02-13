@@ -1,4 +1,64 @@
 /**
+ * The speed of the waves in the ocean.
+ */
+private static final float OCEAN_WAVE_SPEED = 0.05f;
+
+/**
+ * The amount of waves in total, layered above each other.
+ */
+private static final int OCEAN_WAVE_COUNT = 5;
+
+/**
+ * The total scale of the ocean wave height.
+ */
+private static final float OCEAN_WAVE_SCALE = 0.2f;
+
+/**
+ * The individual amplitudes of the waves.
+ */
+private static final float[] OCEAN_WAVE_AMPLITUDES = new float[] { 0.1f, 0.05f, 0.05f, 0.025f, 0.01f };
+
+/**
+ * The individual wave frequencies of the water.
+ */
+private static final float[] OCEAN_WAVE_FREQUENCIES = new float[] { 1.0f, 1.0f / 2.0f, 1.0f / 4.0f, 1.0f / 5.0f, 1.0f / 7.0f };
+
+/**
+ * The size of the ocean.
+ */
+private static final float OCEAN_SCALE = 10_000f;
+
+/**
+ * The Y offset of the ocean.
+ */
+private static final float OCEAN_Y_OFFSET = 2_000f;
+
+/**
+ * Sampels the ocean's y level at a global X|Z coordinate. Will return a global Y position.
+ *
+ * @param x The global x coordinate.
+ * @param z The global z coordinate.
+ * @returns The height of the ocean at (X|Z).
+ */
+public float sampleOceanY(float x, float z)
+{
+  float oceanLocalX = x / OCEAN_SCALE;
+  float oceanLocalZ = z / OCEAN_SCALE;
+  
+  float time = millis() / 1_000f;
+  float time = 0f;
+  float currentWave = 0;
+  for (int i = 0; i < OCEAN_WAVE_COUNT; i++)
+  {
+    currentWave += OCEAN_WAVE_AMPLITUDES[i]
+      * sin((oceanLocalX + time * OCEAN_WAVE_SPEED) * 2f / OCEAN_WAVE_FREQUENCIES[i])
+      * cos((oceanLocalZ + time * OCEAN_WAVE_SPEED) * 2.6f / OCEAN_WAVE_FREQUENCIES[i]);
+  }
+  
+  return OCEAN_Y_OFFSET - OCEAN_SCALE * currentWave * OCEAN_WAVE_SCALE;
+}
+
+/**
  * The class Environment handles everything regarding the world.
  * This includes the skybox, ocean and island the player is on.
  *
@@ -183,8 +243,8 @@ public class Environment
     
     pushMatrix();
     
-    translate(0, 2000, 0);
-    scale(10_000);
+    translate(0, OCEAN_Y_OFFSET, 0);
+    scale(OCEAN_SCALE);
     
     // Render the ocean near plane
     shape(oceanMesh);

@@ -14,17 +14,17 @@ public class Cannon
   /**
    * The minimum horizontal angle the cannon can shoot at.
    */
-  private static final float CANNON_MIN_HORIZONTAL_ANGLE = -45;
+  private static final float CANNON_MIN_HORIZONTAL_ANGLE = -45f;
   
   /**
    * The maximum horizontal angle the cannon can shoot at.
    */
-  private static final float CANNON_MAX_HORIZONTAL_ANGLE = 45;
+  private static final float CANNON_MAX_HORIZONTAL_ANGLE = 45f;
   
   /**
    * The minimum vertical angle the cannon can shoot at.
    */
-  private static final float CANNON_MIN_VERTICAL_ANGLE = -15;
+  private static final float CANNON_MIN_VERTICAL_ANGLE = 0;
   
   /**
    * The maximum vertical angle the cannon can shoot at.
@@ -101,7 +101,7 @@ public class Cannon
    * The current vertical rotation of the cannon barrel. Controls how far the balls will shoot.
    * In range of [-15..85].
    */
-  private float cannonVerticalRotation = 0;
+  private float cannonVerticalRotation = CANNON_MIN_VERTICAL_ANGLE;
   
   /**
    * Constructs a new cannon instance at the provided world position.

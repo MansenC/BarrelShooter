@@ -66,7 +66,7 @@ public class Cannonball
    */
   public void update()
   {
-    if (rigidbody.getPosition().y > 2300)
+    if (rigidbody.getPosition().y > 2100)
     {
       rigidbody.setKinematic(false);
     }
