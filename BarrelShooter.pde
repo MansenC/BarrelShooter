@@ -53,14 +53,20 @@ void draw()
   // First we handle the environment. This includes lighting.
   environment.update();
   
-  // After that we update everything else related to our game and simulation
-  cannon.update();
-  
   // Then it's time for the barrels
   barrelManager.update();
   
+  // After that we draw the cannon. The reason why it's last is simply the UI. Otherwise
+  // any objects drawn beforehand would get rendered above the UI layer.
+  cannon.update();
+  
   // Lastly we update our camera, process the input and update the position.
   camera.update();
+  
+  if (isKeyPressed('i'))
+  {
+    PhysicsManager.physicsFrame = true;
+  }
   
   // Finally we clean up our key and mouse data for this frame.
   framePressedKeys.clear();

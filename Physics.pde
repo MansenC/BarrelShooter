@@ -78,6 +78,8 @@ public static class PhysicsManager
     RIGIDBODIES.remove(rigidbody);
   }
   
+  public static volatile boolean physicsFrame = true;
+  
   /**
    * Executes the physics loop.
    */
@@ -89,10 +91,7 @@ public static class PhysicsManager
     while (running)
     {
       beforeExecutionTime = System.currentTimeMillis();
-      for (Rigidbody rigidbody : RIGIDBODIES)
-      {
-        rigidbody.update();
-      }
+      updateRigidbodies();
       
       // We essentially measure the time it took to update our rigidbodies here.
       // We then subtract this time from our PHYSICS_DELTA so we can get an accurate measure
@@ -106,94 +105,74 @@ public static class PhysicsManager
         continue;
       }
       
-      try
+      do
       {
-        // Actually sleep.
-        Thread.sleep(sleepDelta);
+        try
+        {
+          // Actually sleep.
+          Thread.sleep(sleepDelta);
+        }
+        catch (InterruptedException ex)
+        {
+          ex.printStackTrace();
+          
+          // It is good practice to interrupt the running thread if the wait was interrupted.
+          Thread.currentThread().interrupt();
+        }
       }
-      catch (InterruptedException ex)
-      {
-        ex.printStackTrace();
-        
-        // It is good practice to interrupt the running thread if the wait was interrupted.
-        Thread.currentThread().interrupt();
-      }
+      while (!physicsFrame);
+      
+      physicsFrame = true;
+    }
+  }
+  
+  private static void updateRigidbodies()
+  {
+    // First step: Collision. TODO Collision
+    
+    // Second step: integrate the forces of our rigidbodies
+    for (Rigidbody rigidbody : RIGIDBODIES)
+    {
+      rigidbody.integrateForces();
+    }
+    
+    // Third step: Update the rigidbodies' positions
+    for (Rigidbody rigidbody : RIGIDBODIES)
+    {
+      rigidbody.integrate();
     }
   }
 }
 
-/**
- * Rigidbody docs TODO. Same for Matrix3x4
- */
 public class Rigidbody
 {
-  /**
-   * It should be noted that everything is this world is scaled up by 100x since processing's
-   * camera settings are super weird and I didn't get it right initially. This is why the physics
-   * are scaled up by a margin of 100 as well.
-   */
   public static final float FORCE_SCALE = 100f;
   
+  private static final float GRAVITY_ACCELERATION = 9.81f;
+  
   private final PShape mesh;
-  private final PVector position;
-  private Quaternion rotation = new Quaternion();
-  private final PVector velocity = new PVector();
-  private final PVector constantAcceleration = new PVector();
-  private final PVector lastFrameAcceleration = new PVector();
+  protected final PVector position;
+  private final Matrix3x3 orientation = new Matrix3x3();
+  private final Matrix3x3 inertia = new Matrix3x3(); // TODO for now this is defined as the identity. Will come from shape.
+  private final Matrix3x3 inverseInertia = new Matrix3x3();
+  private Matrix3x3 inverseOrientation = new Matrix3x3();
+  private Matrix3x3 inverseInertiaWorld = new Matrix3x3(); // inverse inertia tensor in world space
   
-  private float inverseMass = 1;
-  private float linearDamping = 1;
-  private float angularDamping = 1;
-  
+  private final PVector force = new PVector();
+  private final PVector torque = new PVector();
+  private final PVector linearVelocity = new PVector();
   private final PVector angularVelocity = new PVector();
-  private Matrix3x4 transformMatrix = new Matrix3x4();
-  private Matrix3x3 inverseInertiaTensor = new Matrix3x3();
-  private Matrix3x3 inverseInertiaTensorWorld = new Matrix3x3();
-  
-  private final PVector currentForces = new PVector();
-  private final PVector currentTorque = new PVector();
   
   private boolean kinematic = true;
+  private boolean gravity = true;
+  protected float inverseMass = 1f;
+  private float linearDamping = 0f;
+  private float angularDamping = 0f;
   
   public Rigidbody(PShape mesh, PVector position)
   {
     this.mesh = mesh;
     this.position = position;
-    
-    PhysicsManager.registerRigidbody(this);
-  }
-  
-  /**
-   * Removes this rigidbody from our physics loop. Without calling this,
-   * the rigidbody will get updated in the background.
-   */
-  public void remove()
-  {
-    PhysicsManager.removeRigidbody(this);
-  }
-  
-  public void setUseGravity()
-  {
-      constantAcceleration.add(0, 9.81f, 0);
-  }
-  
-  public void addForce(PVector force)
-  {
-    currentForces.add(force);
-  }
-  
-  public void addTorque(PVector torque)
-  {
-    currentTorque.add(torque);
-  }
-  
-  public void addForceAtPoint(PVector force, PVector point)
-  {
-    PVector targetPoint = point.copy();
-    targetPoint.sub(position);
-    
-    currentForces.add(force);
-    currentTorque.add(targetPoint.cross(force));
   }
   
   public PVector getPosition()
@@ -201,153 +180,275 @@ public class Rigidbody
     return position;
   }
   
-  public void setKinematic(boolean kinematic)
+  public void setMass(float mass)
   {
-    this.kinematic = kinematic;
+    inverseMass = 1f / mass;
   }
   
-  /**
-   * Updates the physics of this given rigidbody. Synchronized because it may overlap
-   * with our calls to {@link #draw()}.
-   */
-  public synchronized void update()
+  public synchronized void addForce(PVector force)
   {
+    this.force.add(force);
+  }
+  
+  public synchronized void addTorque(PVector torque)
+  {
+    this.torque.add(torque);
+  }
+  
+  public synchronized void addForceAtPoint(PVector force, PVector point)
+  {
+    this.force.add(force);
+    
+    point.sub(position).mult(1f / FORCE_SCALE);
+    torque.add(point.cross(force));
+  }
+  
+  public PVector transformLocalPosition(PVector localPosition)
+  {
+    PVector rotatedPosition = orientation.transform(localPosition);
+    return rotatedPosition.add(position);
+  }
+  
+  public void setLinearDamping(float damping)
+  {
+    linearDamping = damping;
+  }
+  
+  public void setAngularDamping(float damping)
+  {
+    angularDamping = damping;
+  }
+  
+  public synchronized void integrateForces()
+  {
+    // If this rigidbody is fixed in space then we don't need to integrate any forces.
     if (!kinematic)
     {
       return;
     }
     
-    applyKinematics();
+    // Handle linear velocity
+    linearVelocity.add(force.mult(inverseMass * PHYSICS_DELTA * FORCE_SCALE));
+    if (gravity)
+    {
+      linearVelocity.add(0, GRAVITY_ACCELERATION * PHYSICS_DELTA * FORCE_SCALE, 0);
+    }
+    
+    // Handle angular velocity
+    PVector angularVelocityDelta = inverseInertiaWorld.transform(torque.mult(PHYSICS_DELTA));
+    angularVelocity.add(angularVelocityDelta);
+    
+    // Reset the applied force/torque for the next update.
+    force.set(0, 0, 0);
+    torque.set(0, 0, 0);
   }
   
-  /**
-   * Actually draws the rigidbody on screen. This should be called from processing's core loop.
-   * Synchronized because it may overlap with our calls to {@link #update()}.
-   */
+  public synchronized void integrate()
+  {
+    // Handle position
+    position.add(PVector.mult(linearVelocity, PHYSICS_DELTA));
+    
+    // Handle rotation
+    float angle = angularVelocity.mag();
+    PVector axis;
+    if (angle < 0.001f)
+    {
+      // We're using the taylor expansion of sync() here - since we can't divide through 0!
+      float deltaCubed = PHYSICS_DELTA * PHYSICS_DELTA * PHYSICS_DELTA;
+      axis = PVector.mult(
+        angularVelocity,
+        PHYSICS_DELTA / 2f - deltaCubed * 0.020833333333f * angle * angle);
+    }
+    else
+    {
+      axis = PVector.mult(angularVelocity, sin(angle * PHYSICS_DELTA / 2f) / angle);
+    }
+    
+    Quaternion dorn = new Quaternion(axis.x, axis.y, axis.z, cos(angle * PHYSICS_DELTA / 2f));
+    dorn.mult(orientation.toQuaternion());
+    dorn.normalize();
+    
+    orientation.fromQuaternion(dorn);
+    
+    linearVelocity.mult(max(1f - linearDamping * PHYSICS_DELTA, 0));
+    angularVelocity.mult(max(1f - angularDamping * PHYSICS_DELTA, 0));
+    
+    // Finally, update everything that has been affected by our calculations.
+    update();
+  }
+  
+  public synchronized void update()
+  {
+    inverseOrientation = orientation.transpose();
+    // Update bounding box?
+    
+    inverseInertiaWorld = inverseOrientation.mult(inverseInertia).mult(orientation);
+  }
+  
   public synchronized void draw()
   {
-    // Now we can render our mesh.
     pushMatrix();
     
     translate(position.x, position.y, position.z);
     
-    // We convert our quaternion into yaw/pitch/roll, i.e. euler angles
-    float yaw = atan2(2f * (rotation.y * rotation.z + rotation.w * rotation.x), rotation.w * rotation.w - rotation.x * rotation.x - rotation.y * rotation.y + rotation.z * rotation.z);
-    float pitch = asin(-2f * (rotation.x * rotation.z - rotation.w * rotation.y));
-    float roll = atan2(2f * (rotation.x * rotation.y + rotation.w * rotation.z), rotation.w * rotation.w + rotation.x * rotation.x - rotation.y * rotation.y - rotation.z * rotation.z);
-    
-    rotateY(yaw);
-    rotateZ(pitch);
-    rotateX(roll);
+    PVector eulerAngles = orientation.toEulerAngles();
+    rotateX(eulerAngles.x);
+    rotateY(-eulerAngles.y);
+    rotateZ(eulerAngles.z);
     
     shape(mesh);
     
     popMatrix();
   }
+}
+
+public class Matrix3x3
+{
+  public float m00;
+  public float m01;
+  public float m02;
+  public float m10;
+  public float m11;
+  public float m12;
+  public float m20;
+  public float m21;
+  public float m22;
   
-  private void applyKinematics()
+  public Matrix3x3()
   {
-    // Set the last frame acceleration to the current value of acceleration.
-    // Since we know that F=m*a and we apply directional forces to the rigidbodies,
-    // our acceleration is defined as F/m which we apply here after our constant
-    // acceleration.
-    lastFrameAcceleration.set(constantAcceleration);
-    lastFrameAcceleration.add(currentForces.mult(inverseMass));
-    
-    // Now calculate the angular acceleration, apply the acceleration to this frame
-    // and then apply the angular acceleration
-    PVector angularAcceleration = inverseInertiaTensorWorld.transform(currentTorque);
-    velocity.add(PVector.mult(lastFrameAcceleration, PHYSICS_DELTA * FORCE_SCALE));
-    
-    angularVelocity.add(angularAcceleration.mult(PHYSICS_DELTA * FORCE_SCALE));
-    
-    // Calculate the dampened velocities. This is calculating drag.
-    velocity.mult(pow(linearDamping, PHYSICS_DELTA * FORCE_SCALE));
-    angularVelocity.mult(pow(angularDamping, PHYSICS_DELTA * FORCE_SCALE));
-    
-    // We then increase or position and rotation according to our calculated values.
-    position.add(PVector.mult(velocity, PHYSICS_DELTA));
-    rotation.addScaledVector(angularVelocity, PHYSICS_DELTA);
-    
-    // We finally normalize the rotation so it is a valid rotational quaternion again.
-    rotation.normalize();
-    
-    // Then we calculate the new transformations for our position/rotation and inertia.
-    transformMatrix.setOrientationAndPosition(rotation, position);
-    transformInertiaTensor(inverseInertiaTensorWorld, inverseInertiaTensor, transformMatrix);
-    
-    // And lastly we clear the accumulated forces and torque.
-    currentForces.set(0, 0, 0);
-    currentTorque.set(0, 0, 0);
+    m00 = 1f;
+    m11 = 1f;
+    m22 = 1f;
   }
   
-  // I usually really dislike abbreviated names, but here it really is neccessary.
-  private void transformInertiaTensor(
-    Matrix3x3 iitWorld,
-    Matrix3x3 iitBody,
-    Matrix3x4 rotMat)
+  public PVector transform(PVector position)
   {
-    float t4 = rotMat.m00 * iitBody.m00 + rotMat.m01 * iitBody.m10 + rotMat.m02 * iitBody.m20;
-    float t9 = rotMat.m00 * iitBody.m01 + rotMat.m01 * iitBody.m11 + rotMat.m02 * iitBody.m21;
-    float t14 = rotMat.m00 * iitBody.m02 + rotMat.m01 * iitBody.m12 + rotMat.m02 * iitBody.m22;
-    float t28 = rotMat.m10 * iitBody.m00 + rotMat.m11 * iitBody.m10 + rotMat.m12 * iitBody.m20;
-    float t33 = rotMat.m10 * iitBody.m01 + rotMat.m11 * iitBody.m11 + rotMat.m12 * iitBody.m21;
-    float t38 = rotMat.m10 * iitBody.m02 + rotMat.m11 * iitBody.m12 + rotMat.m12 * iitBody.m22;
-    float t52 = rotMat.m20 * iitBody.m00 + rotMat.m21 * iitBody.m10 + rotMat.m22 * iitBody.m20;
-    float t57 = rotMat.m20 * iitBody.m01 + rotMat.m21 * iitBody.m11 + rotMat.m22 * iitBody.m21;
-    float t62 = rotMat.m20 * iitBody.m02 + rotMat.m21 * iitBody.m12 + rotMat.m22 * iitBody.m22;
+    return new PVector(
+      position.x * m00 + position.y * m10 + position.z * m20,
+      -(position.x * m01 + position.y * m11 + position.z * m21),
+      position.x * m02 + position.y * m12 + position.z * m22);
+  }
+  
+  public Matrix3x3 mult(Matrix3x3 other)
+  {
+    Matrix3x3 target = new Matrix3x3();
     
-    iitWorld.m00 = t4 * rotMat.m00 + t9 * rotMat.m01 + t14 * rotMat.m02;
-    iitWorld.m01 = t4 * rotMat.m10 + t9 * rotMat.m11 + t14 * rotMat.m12;
-    iitWorld.m02 = t4 * rotMat.m20 + t9 * rotMat.m21 + t14 * rotMat.m22;
-    iitWorld.m10 = t28 * rotMat.m00 + t33 * rotMat.m01 + t38 * rotMat.m02;
-    iitWorld.m11 = t28 * rotMat.m10 + t33 * rotMat.m11 + t38 * rotMat.m12;
-    iitWorld.m12 = t28 * rotMat.m20 + t33 * rotMat.m21 + t38 * rotMat.m22;
-    iitWorld.m20 = t52 * rotMat.m00 + t57 * rotMat.m01 + t62 * rotMat.m02;
-    iitWorld.m21 = t52 * rotMat.m10 + t57 * rotMat.m11 + t62 * rotMat.m12;
-    iitWorld.m22 = t52 * rotMat.m20 + t57 * rotMat.m21 + t62 * rotMat.m22;
+    target.m00 = m00 * other.m00 + m01 * other.m10 + m02 * other.m20;
+    target.m01 = m00 * other.m01 + m01 * other.m11 + m02 * other.m21;
+    target.m02 = m00 * other.m02 + m01 * other.m12 + m02 * other.m22;
+    target.m10 = m10 * other.m00 + m11 * other.m10 + m12 * other.m20;
+    target.m11 = m10 * other.m01 + m11 * other.m11 + m12 * other.m21;
+    target.m12 = m10 * other.m02 + m11 * other.m12 + m12 * other.m22;
+    target.m20 = m20 * other.m00 + m21 * other.m10 + m22 * other.m20;
+    target.m21 = m20 * other.m01 + m21 * other.m11 + m22 * other.m21;
+    target.m22 = m20 * other.m02 + m21 * other.m12 + m22 * other.m22;
+    
+    return target;
+  }
+  
+  public Matrix3x3 transpose()
+  {
+    Matrix3x3 target = new Matrix3x3();
+    
+    target.m00 = m00;
+    target.m01 = m10;
+    target.m02 = m20;
+    target.m10 = m01;
+    target.m11 = m11;
+    target.m12 = m21;
+    target.m20 = m02;
+    target.m21 = m12;
+    target.m22 = m22;
+    
+    return target;
+  }
+  
+  public void fromQuaternion(Quaternion source)
+  {
+    m00 = 1f - (2f * (source.y * source.y + source.z * source.z));
+    m01 = 2f * (source.x * source.y + source.z * source.w);
+    m02 = 2f * (source.z * source.x - source.y * source.w);
+    m10 = 2f * (source.x * source.y - source.z * source.w);
+    m11 = 1f - (2f * (source.z * source.z + source.x * source.x));
+    m12 = 2f * (source.y * source.z + source.x * source.w);
+    m20 = 2f * (source.z * source.x + source.y * source.w);
+    m21 = 2f * (source.y * source.z - source.x * source.w);
+    m22 = 1f - (2f * (source.y * source.y + source.x * source.x));
+  }
+  
+  // Quaternion from rotation matrix
+  public Quaternion toQuaternion()
+  {
+    float num8 = m00 + m11 + m22;
+    if (num8 > 0f)
+    {
+      float num = 2f * sqrt(num8 + 1f);
+      return new Quaternion(
+        (m12 - m21) / num,
+        (m20 - m02) / num,
+        (m01 - m10) / num,
+        num / 4f);
+    }
+    else if (m00 >= m11 && m00 >= m22)
+    {
+      float num7 = 2f * sqrt(1f + m00 - m11 - m22);
+      return new Quaternion(
+        num7 / 4f,
+        (m01 + m10) / num7,
+        (m02 + m20) / num7,
+        (m12 - m21) / num7);
+    }
+    else if (m11 > m22)
+    {
+      float num6 = 2f * sqrt(1f + m11 - m00 - m22);
+      return new Quaternion(
+        (m10 + m01) / num6,
+        num6 / 4f,
+        (m21 + m12) / num6,
+        (m20 - m02) / num6);
+    }
+    else
+    {
+      float num5 = 2f * sqrt(1f + m22 - m00 - m11);
+      return new Quaternion(
+        (m20 + m02) / num5,
+        (m21 + m12) / num5,
+        num5 / 4f,
+        (m01 - m10) / num5);
+    }
+  }
+  
+  public PVector toEulerAngles()
+  {
+    return new PVector(
+      atan2(m21, m22),
+      atan2(-m20, sqrt(m21 * m21 + m22 * m22)),
+      atan2(m10, m00));
+  }
+  
+  @Override
+  public String toString()
+  {
+    StringBuilder builder = new StringBuilder();
+    builder.append(m00).append(' ').append(m01).append(' ').append(m02).append(' ').append('\n');
+    builder.append(m10).append(' ').append(m11).append(' ').append(m12).append(' ').append('\n');
+    builder.append(m20).append(' ').append(m21).append(' ').append(m22).append(' ').append('\n');
+    return builder.toString();
   }
 }
 
-/**
- * This is a really simple and small implementation of quaternions. They can do a lot more than this
- * but this is all I need. They're just for 3d rotations in our rigidbody.
- *
- * @author HERE_YOUR_FULL_NAME_TODO
- */
 public class Quaternion
 {
-  /**
-   * The x component of the quaternion.
-   */
   private float x;
-  
-  /**
-   * The y component of the quaternion.
-   */
   private float y;
-  
-  /**
-   * The z component of the quaternion.
-   */
   private float z;
-  
-  /**
-   * The w component of the quaternion.
-   */
   private float w;
   
-  /**
-   * Constructs an identity quaternion that applies no rotation at all.
-   */
   public Quaternion()
   {
     this(0, 0, 0, 1);
   }
   
-  /**
-   * Constructs a quaternion from the given individual components.
-   */
   public Quaternion(float x, float y, float z, float w)
   {
     this.x = x;
@@ -356,540 +457,21 @@ public class Quaternion
     this.w = w;
   }
   
-  /**
-   * Normalizes the quaternion so that x, y, z and w all individually squared and added up
-   * equals to one.
-   */
+  public Quaternion mult(Quaternion other)
+  {
+    return new Quaternion(
+      x * other.w + other.x * w + y * other.z - z * other.y,
+      y * other.w + other.y * w + z * other.x - x * other.z,
+      z * other.w + other.z * w + x * other.y - y * other.x,
+      w * other.w - (x * other.x + y * other.y + z * other.z));
+  }
+  
   public void normalize()
   {
-    float determinant = x * x + y * y + z * z + w * w;
-    if (determinant == 0)
-    {
-      w = 1f;
-      return;
-    }
-    
-    float inverseDeterminant = 1 / sqrt(determinant);
-    x *= inverseDeterminant;
-    y *= inverseDeterminant;
-    z *= inverseDeterminant;
-    w *= inverseDeterminant;
-  }
-  
-  /**
-   * Rotates this quaternion by the amount provided by the other quaternion. This is what quaternion
-   * multiplication does.
-   *
-   * @param other The other quaternion.
-   */
-  public void mult(Quaternion other)
-  {
-    float newX = w * other.x + x * other.w + y * other.z - z * other.y;
-    float newY = w * other.y + y * other.w + z * other.x - x * other.z;
-    float newZ = w * other.z + z * other.w + x * other.y - y * other.x;
-    float newW = w * other.w - x * other.x - y * other.y - z * other.z;
-    
-    x = newX;
-    y = newY;
-    z = newZ;
-    w = newW;
-  }
-  
-  /**
-   * This one is unorthodox but it works great. This adds a "scaled vector" to our quaternion here.
-   * Essentially one can think of this as adding a vector perpendicular to a given circle. It's a weird
-   * concept but it works really well here.
-   *
-   * @param vector The vector to add.
-   * @param scale The scale of the provided vector.
-   */
-  public void addScaledVector(PVector vector, float scale)
-  {
-    Quaternion target = new Quaternion(vector.x * scale, vector.y * scale, vector.z * scale, 0);
-    target.mult(this);
-    
-    x += target.x / 2f;
-    y += target.y / 2f;
-    z += target.z / 2f;
-    w += target.w / 2f;
-  }
-}
-
-/**
- * Since processing only provides us with a 3x2 and 4x4 matrix, we have to implement 3x3 ourselves.
- * This is a standard implementation of a 3x3 matrix using floats. We do not implement the PMatrix
- * interface since it requires a lot of useless functionality.
- * TODO do I need to flip?
- * 
- * @author HERE_YOUR_FULL_NAME_TODO
- */
-public class Matrix3x3
-{
-  public float m00,
-    m01,
-    m02,
-    m10,
-    m11,
-    m12,
-    m20,
-    m21,
-    m22;
-
-  /**
-   * Constructor for Matrix3f. Matrix is initialised to the identity.
-   */
-  public Matrix3x3()
-  {
-    setIdentity();
-  }
-
-  /**
-   * Copies a source matrix into this one.
-   
-   * @param src The source matrix.
-   * @return This matrix.
-   */
-  public Matrix3x3 load(Matrix3x3 src)
-  {
-    m00 = src.m00;
-    m10 = src.m10;
-    m20 = src.m20;
-    m01 = src.m01;
-    m11 = src.m11;
-    m21 = src.m21;
-    m02 = src.m02;
-    m12 = src.m12;
-    m22 = src.m22;
-
-    return this;
-  }
-
-  /**
-   * Adds another matrix to this one. In a matrix addition of A+B, this matrix represents A.
-   
-   * @param right The right source matrix.
-   */
-  public void add(Matrix3x3 right)
-  {
-    m00 += right.m00;
-    m01 += right.m01;
-    m02 += right.m02;
-    m10 += right.m10;
-    m11 += right.m11;
-    m12 += right.m12;
-    m20 += right.m20;
-    m21 += right.m21;
-    m22 += right.m22;
-  }
-
-  /**
-   * Subtracts another matrix from this one. In a matrix addition of A-B, this matrix represents A.
-   
-   * @param right The right source matrix.
-   */
-  public void sub(Matrix3x3 right)
-  {
-    m00 -= right.m00;
-    m01 -= right.m01;
-    m02 -= right.m02;
-    m10 -= right.m10;
-    m11 -= right.m11;
-    m12 -= right.m12;
-    m20 -= right.m20;
-    m21 -= right.m21;
-    m22 -= right.m22;
-  }
-
-  /**
-   * Multipies this matrix with another one. In a matrix multiplication A*B, this matrix represents A.
-   
-   * @param right The right source matrix.
-   */
-  public void mult(Matrix3x3 right)
-  {
-    float m00 = this.m00 * right.m00 + this.m10 * right.m01 + this.m20 * right.m02;
-    float m01 = this.m01 * right.m00 + this.m11 * right.m01 + this.m21 * right.m02;
-    float m02 = this.m02 * right.m00 + this.m12 * right.m01 + this.m22 * right.m02;
-    float m10 = this.m00 * right.m10 + this.m10 * right.m11 + this.m20 * right.m12;
-    float m11 = this.m01 * right.m10 + this.m11 * right.m11 + this.m21 * right.m12;
-    float m12 = this.m02 * right.m10 + this.m12 * right.m11 + this.m22 * right.m12;
-    float m20 = this.m00 * right.m20 + this.m10 * right.m21 + this.m20 * right.m22;
-    float m21 = this.m01 * right.m20 + this.m11 * right.m21 + this.m21 * right.m22;
-    float m22 = this.m02 * right.m20 + this.m12 * right.m21 + this.m22 * right.m22;
-
-    this.m00 = m00;
-    this.m01 = m01;
-    this.m02 = m02;
-    this.m10 = m10;
-    this.m11 = m11;
-    this.m12 = m12;
-    this.m20 = m20;
-    this.m21 = m21;
-    this.m22 = m22;
-  }
-  
-  /**
-   * Multiplies the current matrix by the provided scalar factor.
-   *
-   * @param scalar The scalar factor to multiply by.
-   */
-  public void mult(float scalar)
-  {
-    m00 *= scalar;
-    m01 *= scalar;
-    m02 *= scalar;
-    m10 *= scalar;
-    m11 *= scalar;
-    m12 *= scalar;
-    m20 *= scalar;
-    m21 *= scalar;
-    m22 *= scalar;
-  }
-
-  /**
-   * Transforms a vector by this matrix and returns the result. In a multiplication of
-   * A*B, where B is the vector, A is this matrix.
-   *
-   * @param right The right vector.
-   * @return The transformed vector.
-   */
-  public PVector transform(PVector right)
-  {
-    float x = m00 * right.x + m10 * right.y + m20 * right.z;
-    float y = m01 * right.x + m11 * right.y + m21 * right.z;
-    float z = m02 * right.x + m12 * right.y + m22 * right.z;
-
-    return new PVector(x, y, z);
-  }
-
-  /**
-   * Transposes this matrix.
-   */
-  public void transpose()
-  {
-    float m00 = this.m00;
-    float m01 = this.m10;
-    float m02 = this.m20;
-    float m10 = this.m01;
-    float m11 = this.m11;
-    float m12 = this.m21;
-    float m20 = this.m02;
-    float m21 = this.m12;
-    float m22 = this.m22;
-
-    this.m00 = m00;
-    this.m01 = m01;
-    this.m02 = m02;
-    this.m10 = m10;
-    this.m11 = m11;
-    this.m12 = m12;
-    this.m20 = m20;
-    this.m21 = m21;
-    this.m22 = m22;
-  }
-
-  /**
-   * Calculates the determinant for this matrix.
-   *
-   * @return the determinant of the matrix
-   */
-  public float determinant()
-  {
-    return m00 * (m11 * m22 - m12 * m21)
-      + m01 * (m12 * m20 - m10 * m22)
-      + m02 * (m10 * m21 - m11 * m20);
-  }
-
-  /**
-   * Inverts this matrix.
-   */
-  public void invert()
-  {
-    float determinant = determinant();
-    if (determinant == 0)
-    {
-      throw new IllegalStateException("Cannot invert a 3x3 matrix with a determinant of 0!");
-    }
-    
-    /*
-     * Do it the ordinary way:
-     * inv(A) = 1/det(A) * adj(T), where adj(T) = transpose(Conjugate Matrix)
-     */
-    float inverseDeterminant = 1f / determinant;
-    
-    // get the conjugate matrix
-    float t00 = m11 * m22 - m12* m21;
-    float t01 = -m10 * m22 + m12 * m20;
-    float t02 = m10 * m21 - m11 * m20;
-    float t10 = -m01 * m22 + m02 * m21;
-    float t11 = m00 * m22 - m02 * m20;
-    float t12 = -m00 * m21 + m01 * m20;
-    float t20 = m01 * m12 - m02 * m11;
-    float t21 = -m00 * m12 + m02 * m10;
-    float t22 = m00 * m11 - m01 * m10;
-    
-    m00 = t00 * inverseDeterminant;
-    m11 = t11 * inverseDeterminant;
-    m22 = t22 * inverseDeterminant;
-    m01 = t10 * inverseDeterminant;
-    m10 = t01 * inverseDeterminant;
-    m20 = t02 * inverseDeterminant;
-    m02 = t20 * inverseDeterminant;
-    m12 = t21 * inverseDeterminant;
-    m21 = t12 * inverseDeterminant;
-  }
-
-  /**
-   * Negates this matrix.
-   */
-  public void negate()
-  {
-    m00 = -m00;
-    m01 = -m02;
-    m02 = -m01;
-    m10 = -m10;
-    m11 = -m12;
-    m12 = -m11;
-    m20 = -m20;
-    m21 = -m22;
-    m22 = -m21;
-  }
-
-  /**
-   * Sets this matrix to be the identity matrix.
-   */
-  public void setIdentity() {
-    m00 = 1.0f;
-    m01 = 0.0f;
-    m02 = 0.0f;
-    m10 = 0.0f;
-    m11 = 1.0f;
-    m12 = 0.0f;
-    m20 = 0.0f;
-    m21 = 0.0f;
-    m22 = 1.0f;
-  }
-
-  /**
-   * Sets this matrix to 0.
-   */
-  public void setZero() {
-    m00 = 0.0f;
-    m01 = 0.0f;
-    m02 = 0.0f;
-    m10 = 0.0f;
-    m11 = 0.0f;
-    m12 = 0.0f;
-    m20 = 0.0f;
-    m21 = 0.0f;
-    m22 = 0.0f;
-  }
-
-  @Override
-  public String toString()
-  {
-    StringBuilder builder = new StringBuilder();
-    builder.append(m00).append(' ').append(m10).append(' ').append(m20).append(' ').append('\n');
-    builder.append(m01).append(' ').append(m11).append(' ').append(m21).append(' ').append('\n');
-    builder.append(m02).append(' ').append(m12).append(' ').append(m22).append(' ').append('\n');
-    return builder.toString();
-  }
-}
-
-/**
- * We also unfortunately need a Matrix3x4, which means 3 rows 4 columns. This also is used in our rigidbody
- * but in this case for the transform.
- *
- * @author HERE_YOUR_FULL_NAME_TODO
- */
-public class Matrix3x4
-{
-  public float m00; // 0
-  public float m01; // 1
-  public float m02; // 2
-  public float m03; // 3
-  public float m10; // 4
-  public float m11; // 5
-  public float m12; // 6
-  public float m13; // 7
-  public float m20; // 8
-  public float m21; // 9
-  public float m22; // 10
-  public float m23; // 11
-  
-  public Matrix3x4()
-  {
-    setIdentity();
-  }
-  
-  public PVector transform(PVector right)
-  {
-    float x = right.x * m00 + right.y * m01 + right.z * m02 + m03;
-    float y = right.x * m10 + right.y * m11 + right.z * m12 + m13;
-    float z = right.x * m20 + right.y * m21 + right.z * m22 + m23;
-    
-    return new PVector(x, y, z);
-  }
-  
-  public PVector transformInverse(PVector right)
-  {
-    PVector temp = right.copy();
-    temp.sub(m03, m13, m23);
-    return new PVector(
-      temp.x * m00 + temp.y * m10 + temp.z * m20,
-      temp.x * m01 + temp.y * m11 + temp.z * m21,
-      temp.x * m02 + temp.y * m12 + temp.z * m22);
-  }
-  
-  public PVector transformDirection(PVector right)
-  {
-    float x = right.x * m00 + right.y * m01 + right.z * m02;
-    float y = right.x * m10 + right.y * m11 + right.z * m12;
-    float z = right.x * m20 + right.y * m21 + right.z * m22;
-    
-    return new PVector(x, y, z);
-  }
-  
-  public PVector transformInverseDirection(PVector right)
-  {
-    float x = right.x * m00 + right.y * m10 + right.z * m20;
-    float y = right.x * m01 + right.y * m11 + right.z * m21;
-    float z = right.x * m02 + right.y * m12 + right.z * m22;
-    
-    return new PVector(x, y, z);
-  }
-  
-  public void mult(Matrix3x4 right)
-  {
-    float m00 = this.m00 * right.m00 + this.m01 * right.m10 + this.m02 * right.m20;
-    float m01 = this.m00 * right.m01 + this.m01 * right.m11 + this.m02 * right.m21;
-    float m02 = this.m00 * right.m02 + this.m01 * right.m12 + this.m02 * right.m22;
-    float m03 = this.m00 * right.m03 + this.m01 * right.m13 + this.m02 * right.m23 + this.m03;
-    float m10 = this.m10 * right.m00 + this.m11 * right.m10 + this.m12 * right.m20;
-    float m11 = this.m10 * right.m01 + this.m11 * right.m11 + this.m12 * right.m21;
-    float m12 = this.m10 * right.m02 + this.m11 * right.m12 + this.m12 * right.m22;
-    float m13 = this.m10 * right.m03 + this.m11 * right.m13 + this.m12 * right.m23 + this.m13;
-    float m20 = this.m20 * right.m00 + this.m21 * right.m10 + this.m22 * right.m20;
-    float m21 = this.m20 * right.m01 + this.m21 * right.m11 + this.m22 * right.m21;
-    float m22 = this.m20 * right.m02 + this.m21 * right.m12 + this.m22 * right.m22;
-    float m23 = this.m20 * right.m03 + this.m21 * right.m13 + this.m22 * right.m23 + this.m23;
-    
-    this.m00 = m00;
-    this.m01 = m01;
-    this.m02 = m02;
-    this.m03 = m03;
-    this.m10 = m10;
-    this.m11 = m11;
-    this.m12 = m12;
-    this.m13 = m13;
-    this.m20 = m20;
-    this.m21 = m21;
-    this.m22 = m22;
-    this.m23 = m23;
-  }
-  
-  public float determinant()
-  {
-    return m00 * m11 * m22
-      - m00 * m12 * m21
-      - m01 * m10 * m22
-      + m01 * m12 * m20
-      + m02 * m10 * m21
-      - m02 * m11 * m20;
-  }
-  
-  public void invert()
-  {
-    float determinant = determinant();
-    if (determinant == 0)
-    {
-      throw new IllegalStateException("Cannot invert a 3x3 matrix with a determinant of 0!");
-    }
-    
-    float inverseDeterminant = 1 / determinant;
-    float t00 = m11 * m22 - m12 * m21;
-    float t01 = m02 * m21 - m01 * m22;
-    float t02 = m01 * m12 - m02 * m11;
-    float t03 = m03 * m12 * m21
-              + m02 * m11 * m23
-              + m01 * m13 * m22
-              - m01 * m12 * m23
-              - m02 * m13 * m21
-              - m03 * m11 * m22;
-    float t10 = m12 * m20 - m10 * m22;
-    float t11 = m00 * m22 - m02 * m20;
-    float t12 = m02 * m10 - m00 * m12;
-    float t13 = m03 * m10 * m22
-              + m02 * m13 * m20
-              + m00 * m12 * m23
-              - m03 * m12 * m20
-              - m02 * m10 * m23
-              - m00 * m13 * m22;
-    float t20 = m10 * m21 - m11 * m20;
-    float t21 = m01 * m20 - m00 * m21;
-    float t22 = m00 * m11 - m01 * m10;
-    float t23 = m03 * m11 * m20
-              + m01 * m10 * m23
-              + m00 * m13 * m21
-              - m03 * m10 * m21
-              - m00 * m11 * m23
-              - m01 * m13 * m20;
-    
-    m00 = t00 * inverseDeterminant;
-    m01 = t01 * inverseDeterminant;
-    m02 = t02 * inverseDeterminant;
-    m03 = t03 * inverseDeterminant;
-    m10 = t10 * inverseDeterminant;
-    m11 = t11 * inverseDeterminant;
-    m12 = t12 * inverseDeterminant;
-    m13 = t13 * inverseDeterminant;
-    m20 = t20 * inverseDeterminant;
-    m21 = t21 * inverseDeterminant;
-    m22 = t22 * inverseDeterminant;
-    m23 = t23 * inverseDeterminant;
-  }
-  
-  public void setOrientationAndPosition(Quaternion orientation, PVector position)
-  {
-    m00 = 1 - (2 * orientation.y * orientation.y + 2 * orientation.z * orientation.z);
-    m01 = 2 * orientation.x * orientation.y + 2 * orientation.z * orientation.w;
-    m02 = 2 * orientation.x * orientation.z - 2 * orientation.y * orientation.w;
-    m03 = position.x;
-    
-    m10 = 2 * orientation.x * orientation.y - 2 * orientation.z * orientation.w;
-    m11 = 1 - (2 * orientation.x * orientation.x + 2 * orientation.z * orientation.z);
-    m12 = 2 * orientation.y * orientation.z + 2 * orientation.x * orientation.w;
-    m13 = position.y;
-    
-    m20 = 2 * orientation.x * orientation.z + 2 * orientation.y * orientation.w;
-    m21 = 2 * orientation.y * orientation.z - 2 * orientation.x * orientation.w;
-    m22 = 1 - (2 * orientation.x * orientation.x + 2 * orientation.y * orientation.y);
-    m23 = position.z;
-  }
-  
-  public void setIdentity()
-  {
-    m00 = 1;
-    m01 = 0;
-    m02 = 0;
-    m03 = 0;
-    m10 = 0;
-    m11 = 1;
-    m12 = 0;
-    m13 = 0;
-    m20 = 0;
-    m21 = 0;
-    m22 = 1;
-    m23 = 0;
-  }
-
-  @Override
-  public String toString()
-  {
-    StringBuilder builder = new StringBuilder();
-    builder.append(m00).append(' ').append(m01).append(' ').append(m02).append(' ').append(m03).append(' ').append('\n');
-    builder.append(m10).append(' ').append(m11).append(' ').append(m12).append(' ').append(m13).append(' ').append('\n');
-    builder.append(m20).append(' ').append(m21).append(' ').append(m22).append(' ').append(m23).append(' ').append('\n');
-    return builder.toString();
+    float inverseLength = 1f / sqrt(x * x + y * y + z * z + w * w);
+    x *= inverseLength;
+    y *= inverseLength;
+    z *= inverseLength;
+    w *= inverseLength;
   }
 }

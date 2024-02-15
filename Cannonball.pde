@@ -22,11 +22,6 @@ public class Cannonball
   private static final float CANNONBALL_VELOCITY = 1_400f;
   
   /**
-   * The gravitational value.
-   */
-  private static final float GRAVITY = 9.81f;
-  
-  /**
    * The rigidbody that takes over the calculations for our physics.
    */
   private final Rigidbody rigidbody;
@@ -47,7 +42,7 @@ public class Cannonball
   public Cannonball(PVector position, float yaw, float pitch)
   {
     rigidbody = new Rigidbody(cannonballShape, position);
-    rigidbody.setUseGravity();
+    PhysicsManager.registerRigidbody(rigidbody);
     
     float radiansYaw = radians(yaw);
     float radiansPitch = radians(-pitch);
@@ -66,9 +61,9 @@ public class Cannonball
    */
   public void update()
   {
-    if (rigidbody.getPosition().y > 2100)
+    // if (rigidbody.getPosition().y > 2100)
     {
-      rigidbody.setKinematic(false);
+      // rigidbody.setKinematic(false);
     }
     
     rigidbody.draw();

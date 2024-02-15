@@ -1,4 +1,9 @@
 /**
+ * Whether or not the ocean stays at a fixed position.
+ */
+private static final boolean FIXED_OCEAN = false;
+
+/**
  * The speed of the waves in the ocean.
  */
 private static final float OCEAN_WAVE_SPEED = 0.05f;
@@ -45,8 +50,7 @@ public float sampleOceanY(float x, float z)
   float oceanLocalX = x / OCEAN_SCALE;
   float oceanLocalZ = z / OCEAN_SCALE;
   
-  float time = millis() / 1_000f;
-  float time = 0f;
+  float time = FIXED_OCEAN ? 0 : millis() / 1_000f;
   float currentWave = 0;
   for (int i = 0; i < OCEAN_WAVE_COUNT; i++)
   {
@@ -239,7 +243,7 @@ public class Environment
     textureWrap(REPEAT);
     oceanNearShader.set("foamTexture", oceanVoronoi);
     oceanNearShader.set("flowMap", flowMap);
-    oceanNearShader.set("time", millis() / 1_000f);
+    oceanNearShader.set("time", FIXED_OCEAN ? 0f : millis() / 1_000f);
     
     pushMatrix();
     

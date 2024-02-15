@@ -111,11 +111,11 @@ public class BarrelManager
  */
 public class Barrel
 {
-  private final Rigidbody rigidbody;
+  private final BarrelRigidbody rigidbody;
   
   public Barrel(PVector position)
   {
-    rigidbody = new Rigidbody(barrelShape, position);
+    rigidbody = new BarrelRigidbody(position);
   }
   
   public Rigidbody getRigidbody()
@@ -126,5 +126,226 @@ public class Barrel
   public void draw()
   {
     rigidbody.draw();
+    // rigidbody.drawVoxels();
+  }
+}
+
+public class BarrelRigidbody extends Rigidbody
+{
+  /**
+   * The size of a voxel used for the buoyancy calculations. Subdivides the cylinder around
+   * the barrel into <code>VOXEL_CYLINDER_SIZE / VOXEL_SIZE</code> voxels per side.
+   */
+  private static final float VOXEL_SIZE = 25f;
+  
+  /**
+   * The radius and height of our voxel cylinder.
+   * Note: This value is hard-coded and based on the shape of our barrel. The barrel fits
+   * inside a 200x200x200 cube.
+   */
+  private static final float VOXEL_CYLINDER_SIZE = 200;
+  
+  /**
+   * The actual amount of voxels per side we have to store.
+   */
+  private static final int VOXEL_COUNT = (int) (VOXEL_CYLINDER_SIZE / VOXEL_SIZE);
+  
+  /**
+   * Our voxel grid, no element in here is ever null, though voxels might be set to invalid
+   * if they're not part of our physics calculations.
+   */
+  private final Voxel[][][] voxels;
+  
+  /**
+   * The amount of valid voxels we have. Required to determine the amount of force each voxel
+   * applies to our barrel.
+   */
+  private int validVoxels = 0;
+  
+  public BarrelRigidbody(PVector position)
+  {
+    super(barrelShape, position);
+    
+    voxels = new Voxel[VOXEL_COUNT][VOXEL_COUNT][VOXEL_COUNT];
+    initializeVoxels();
+    
+    setMass(30f);
+    
+    PhysicsManager.registerRigidbody(this);
+  }
+  
+  public synchronized void drawVoxels()
+  {
+    for (int x = 0; x < VOXEL_COUNT; x++)
+    {
+      for (int y = 0; y < VOXEL_COUNT; y++)
+      {
+        for (int z = 0; z < VOXEL_COUNT; z++)
+        {
+          if (!voxels[x][y][z].isValid())
+          {
+            continue;
+          }
+          
+          pushMatrix();
+          
+          PVector worldPosition = transformLocalPosition(voxels[x][y][z].getPosition());
+          translate(worldPosition.x, worldPosition.y, worldPosition.z);
+          box(VOXEL_SIZE - 1);
+          
+          popMatrix();
+        }
+      }
+    }
+  }
+  
+  /**
+   * Since we need to do our own heavy physics calculations, integrateForces has to be overwritten.
+   * This is also the reason why we overwrite our rigidbody. I've restrained from calling
+   * it FloatingRigidbody since this specifically applies to our barrel shape, mostly due
+   * to the voxelization we do.
+   */
+  @Override
+  public void integrateForces()
+  {
+    // We calculate the volume and density of our barrel first.
+    // Note that we have to factor down the size by the force scale here to stay accurate.
+    float volume = PI * (VOXEL_CYLINDER_SIZE / FORCE_SCALE / 2f) * (VOXEL_CYLINDER_SIZE / FORCE_SCALE / 2f) * VOXEL_CYLINDER_SIZE / FORCE_SCALE;
+    float density = volume * inverseMass;
+    
+    // This is the amount of force each voxel applies to our barrel.
+    float forcePerVoxel = (1f - density) / validVoxels;
+    float submergedVolume = 0f;
+    
+    // We have to perform the following calculations for each individual valid voxel.
+    for (int x = 0; x < VOXEL_COUNT; x++)
+    {
+      for (int y = 0; y < VOXEL_COUNT; y++)
+      {
+        for (int z = 0; z < VOXEL_COUNT; z++)
+        {
+          Voxel targetVoxel = voxels[x][y][z];
+          if (!targetVoxel.isValid())
+          {
+            continue;
+          }
+          
+          // We transform the voxel's position into world space and get the water height.
+          PVector worldPosition = transformLocalPosition(targetVoxel.getPosition());
+          float waterHeight = sampleOceanY(worldPosition.x, worldPosition.z);
+          
+          // From there on we calculate the depth of the voxel and how much of it is
+          // approximately submerged. The depth measures to the top of the voxel.
+          // Remember, y is inverted for some processing reason!
+          float depth = worldPosition.y - waterHeight + VOXEL_SIZE;
+          float submergedPercentage = constrain(depth / VOXEL_SIZE, 0f, 1f);
+          
+          // We now add the submerged percentage to the submerged volume.
+          submergedVolume += submergedPercentage;
+          
+          // The deeper we are, the bigger the displacement. Except for above the
+          // water, where we don't displace at all.
+          float displacement = max(depth, 0);
+          
+          // We now calculate the force that we apply to the rigidbody.
+          PVector force = new PVector(0, -9.81f, 0);
+          force.mult(displacement * forcePerVoxel);
+          
+          // And we apply it orientation-based from our voxel position.
+          addForceAtPoint(force, worldPosition);
+        }
+      }
+    }
+    
+    // In order to obtain the total percentage of submerged volume we just divide by
+    // the amount of valid voxels we have.
+    submergedVolume /= validVoxels;
+    
+    setLinearDamping(lerp(0.0f, 1.0f, submergedVolume));
+    setAngularDamping(lerp(0.05f, 1.0f, submergedVolume));
+    
+    // We update our rigidbody data as the last thing we do, in order to apply our calculations
+    // immediately.
+    super.integrateForces();
+  }
+  
+  /**
+   * Initializes our voxel grid. Voxels are in position relative to the barrel itself, though to scale.
+   * That means that one of the corners of the box we span is at (-100, -100, -100) for example.
+   */
+  private void initializeVoxels()
+  {
+    for (int x = 0; x < VOXEL_COUNT; x++)
+    {
+      for (int y = 0; y < VOXEL_COUNT; y++)
+      {
+        for (int z = 0; z < VOXEL_COUNT; z++)
+        {
+          float localX = ((VOXEL_SIZE - VOXEL_CYLINDER_SIZE) / 2f) + (x * VOXEL_SIZE);
+          float localY = ((VOXEL_SIZE - VOXEL_CYLINDER_SIZE) / 2f) + (y * VOXEL_SIZE);
+          float localZ = ((VOXEL_SIZE - VOXEL_CYLINDER_SIZE) / 2f) + (z * VOXEL_SIZE);
+          
+          boolean valid = localX * localX + localZ * localZ < (VOXEL_CYLINDER_SIZE / 2) * (VOXEL_CYLINDER_SIZE / 2);
+          voxels[x][y][z] = new Voxel(new PVector(localX, localY, localZ), valid);
+          
+          if (valid)
+          {
+            validVoxels++;
+          }
+        }
+      }
+    }
+  }
+  
+  /**
+   * A small struct that holds data over its local position and whether or not it's included in calculations.
+   *
+   * @author HERE_YOUR_FULL_NAME_TODO
+   */
+  private class Voxel
+  {
+    /**
+     * The local position, relative to our barrel.
+     */
+    private final PVector position;
+    
+    /**
+     * Whether or not this voxel is valid for the physics calculations. If it's not then it's outside
+     * the voxel cylinder's bounds.
+     */
+    private final boolean valid;
+    
+    /**
+     * Constructs a new voxel at the given position with whether or not the voxel is valid for our
+     * buoyancy calculations.
+     *
+     * @param position The model-local position.
+     * @param valid Whether or not the voxel is valid.
+     */
+    public Voxel(PVector position, boolean valid)
+    {
+      this.position = position;
+      this.valid = valid;
+    }
+    
+    /**
+     * The model-local position. Needs to be transformed to world position first for use.
+     *
+     * @returns The model-local position of this voxel.
+     */
+    public PVector getPosition()
+    {
+      return position;
+    }
+    
+    /**
+     * The voxel is valid for our calculations if it is inside the cylinder defining our barrel.
+     *
+     * @returns Whether or not this voxel is valid for calculations.
+     */
+    public boolean isValid()
+    {
+      return valid;
+    }
   }
 }

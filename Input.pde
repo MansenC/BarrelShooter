@@ -7,17 +7,17 @@ import java.util.HashSet;
  * have no effect. This is not the case for the respective keyCode, which is required for the modifier keys
  * respectively, namely shift.
  */
-Set<Integer> currentlyPressedKeys = new HashSet<>();
+private static Set<Integer> currentlyPressedKeys = new HashSet<>();
 
 /**
  * A set of all keys that were pressed down this frame. Acts identically to {@link #currentlyPressedKeys}.
  */
-Set<Integer> framePressedKeys = new HashSet<>();
+private static Set<Integer> framePressedKeys = new HashSet<>();
 
 /**
  * A set of all mouse buttons that were pressed down this frame.
  */
-Set<Integer> framePressedMouseButtons = new HashSet<>();
+private static Set<Integer> framePressedMouseButtons = new HashSet<>();
 
 /**
  * The keyPressed event listens so that we do not have to rely on the last key being pressed, which results in unintended
@@ -55,7 +55,7 @@ void mousePressed()
  * @param expectedKey The key code or character to check against.
  * @return True if the key is being pressed down right now, false otherwise.
  */
-boolean isKeyDown(int expectedKey)
+private static boolean isKeyDown(int expectedKey)
 {
   return currentlyPressedKeys.contains(expectedKey);
 }
@@ -66,7 +66,7 @@ boolean isKeyDown(int expectedKey)
  * @param expectedKey The key code or character to check against.
  * @return True if the key was pressed down this frame, false otherwise.
  */
-boolean isKeyPressed(int expectedKey)
+private static boolean isKeyPressed(int expectedKey)
 {
   return framePressedKeys.contains(expectedKey);
 }
@@ -79,7 +79,7 @@ boolean isKeyPressed(int expectedKey)
  * @param expectedKey The key code or character to check against.
  * @return True if the key combination was entered this frame, false otherwise.
  */
-boolean isCombinationPressed(int modifier, int expectedKey)
+private static boolean isCombinationPressed(int modifier, int expectedKey)
 {
   if (!isKeyDown(modifier) || !isKeyDown(expectedKey))
   {
@@ -95,7 +95,7 @@ boolean isCombinationPressed(int modifier, int expectedKey)
  * @param expectedButton The button to check against.
  * @return True if the mouse button was pressed down this frame, false otherwise.
  */
-boolean isMouseButtonPressed(int expectedButton)
+private static boolean isMouseButtonPressed(int expectedButton)
 {
   return framePressedMouseButtons.contains(expectedButton);
 }
