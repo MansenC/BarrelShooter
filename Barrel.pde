@@ -164,7 +164,7 @@ public class BarrelRigidbody extends Rigidbody
   
   public BarrelRigidbody(PVector position)
   {
-    super(barrelShape, position);
+    super(barrelShape, new CylinderShape(200, 100), position);
     
     voxels = new Voxel[VOXEL_COUNT][VOXEL_COUNT][VOXEL_COUNT];
     initializeVoxels();

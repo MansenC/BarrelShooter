@@ -41,7 +41,7 @@ public class Cannonball
    */
   public Cannonball(PVector position, float yaw, float pitch)
   {
-    rigidbody = new Rigidbody(cannonballShape, position);
+    rigidbody = new Rigidbody(cannonballShape, new SphereCollisionShape(40f), position);
     PhysicsManager.registerRigidbody(rigidbody);
     
     float radiansYaw = radians(yaw);

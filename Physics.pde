@@ -12,6 +12,8 @@ public static final float PHYSICS_DELTA = 1f / 50;
  * why the physics manager exists, it spins up a new thread that runs at 50FPS and
  * updates physics according to that framerate, so that no weird behavior occurs
  * with the framerate.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
  */
 public static class PhysicsManager
 { 
@@ -19,6 +21,8 @@ public static class PhysicsManager
    * Whether or not the physics are updated or not.
    */
   private static volatile boolean running = true;
+  
+  private static final CollisionManager COLLISION_MANAGER = new CollisionManager();
   
   /**
    * A list of all active rigidbodies that need updating. We cannot use a simple
@@ -67,7 +71,10 @@ public static class PhysicsManager
    */
   public static void registerRigidbody(Rigidbody rigidbody)
   {
-    RIGIDBODIES.add(rigidbody);
+    synchronized(RIGIDBODIES)
+    {
+      RIGIDBODIES.add(rigidbody);
+    }
   }
   
   /**
@@ -75,7 +82,10 @@ public static class PhysicsManager
    */
   public static void removeRigidbody(Rigidbody rigidbody)
   {
-    RIGIDBODIES.remove(rigidbody);
+    synchronized (RIGIDBODIES)
+    {
+      RIGIDBODIES.remove(rigidbody);
+    }
   }
   
   public static volatile boolean physicsFrame = true;
@@ -129,6 +139,7 @@ public static class PhysicsManager
   private static void updateRigidbodies()
   {
     // First step: Collision. TODO Collision
+    COLLISION_MANAGER.detectCollisions();
     
     // Second step: integrate the forces of our rigidbodies
     for (Rigidbody rigidbody : RIGIDBODIES)
@@ -144,6 +155,367 @@ public static class PhysicsManager
   }
 }
 
+/**
+ * Based on broadphase detection aka each body is checked against each body. This implementation
+ * is fine for the amount of shapes and shape types we are expecting.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
+public static class CollisionManager
+{
+  private static final float COLLISION_EPSILON = 1e-4f;
+  private static final int MAX_ITERATIONS = 34;
+  
+  private boolean swapOrder = false;
+  
+  public void detectCollisions()
+  {
+    synchronized (PhysicsManager.RIGIDBODIES)
+    {
+      for (int base = 0; base < PhysicsManager.RIGIDBODIES.size(); base++)
+      {
+        for (int compare = base + 1; compare < PhysicsManager.RIGIDBODIES.size(); compare++)
+        {
+          if (swapOrder)
+          {
+            detectRigidbodyCollision(
+              PhysicsManager.RIGIDBODIES.get(base),
+              PhysicsManager.RIGIDBODIES.get(compare));
+          }
+          else
+          {
+            detectRigidbodyCollision(
+              PhysicsManager.RIGIDBODIES.get(compare),
+              PhysicsManager.RIGIDBODIES.get(base));
+          }
+          
+          swapOrder = !swapOrder;
+        }
+      }
+    }
+  }
+  
+  private void detectRigidbodyCollision(Rigidbody first, Rigidbody second)
+  {
+    // I'm not going to implement speculative collision detection since we want to stay
+    // accurate. So we're just detecting raw collisions here.
+    // For more information on the collision detection, refer to
+    // https://xbdev.net/misc_demos/demos/minkowski_difference_collisions/paper.pdf
+    // and http://xenocollide.snethen.com/
+    
+    PVector v01 = first.getPosition().copy();
+    PVector v02 = second.getPosition().copy();
+    
+    // v0 is the center of the minkowski difference
+    PVector v0 = PVector.sub(v02, v01);
+    if (v0.magSq() < EPSILON * EPSILON)
+    {
+      // We avoid cases where the center overlaps. Direction doesn't matter.
+      v0 = new PVector(0.00001f, 0, 0);
+    }
+    
+    PVector normal = PVector.mult(v0, -1);
+    
+    PVector v11 = supportMapTransformed(first, v0);
+    PVector v12 = supportMapTransformed(second, normal);
+    PVector v1 = PVector.sub(v12, v11);
+    
+    if (v1.dot(normal) <= 0f)
+    {
+      // No collision - we return.
+      return;
+    }
+    
+    normal = v1.cross(v0);
+    if (normal.magSq() < EPSILON * EPSILON)
+    {
+      // We have a collision!
+      normal = PVector.sub(v1, v0).normalize();
+      
+      PVector point = v11.copy().add(v12).mult(0.5f);
+      float penetration = PVector.sub(v12, v11).dot(normal);
+      
+      collisionDetected(first, second, point, normal, penetration);
+      return;
+    }
+    
+    PVector v21 = supportMapTransformed(first, PVector.mult(normal, -1));
+    PVector v22 = supportMapTransformed(second, normal);
+    PVector v2 = PVector.sub(v22, v21);
+    
+    if (v2.dot(normal) <= 0f)
+    {
+      return;
+    }
+    
+    // Determine whether origin is on + or - side of plane (v1,v0,v2)
+    normal = PVector.sub(v1, v0).cross(PVector.sub(v2, v0));
+    
+    // If the origin is on the - side of the plane, reverse the direction of the plane
+    if (normal.dot(v0) > 0f)
+    {
+      swap(v1, v2);
+      swap(v11, v21);
+      swap(v12, v22);
+      normal.mult(-1);
+    }
+    
+    int phase1 = 0;
+    int phase2 = 0;
+    boolean hit = false;
+    
+    PVector point = new PVector();
+    float penetration = 0;
+    
+    // Phase 1: identify a portal
+    while (phase1++ < MAX_ITERATIONS)
+    {
+      // Obtain the support point in a direction perpendicular to the existing plane
+      // Note: This point is guaranteed to lie off the plane
+      PVector v31 = supportMapTransformed(first, PVector.mult(normal, -1));
+      PVector v32 = supportMapTransformed(second, normal);
+      PVector v3 = PVector.sub(v32, v31);
+      
+      if (v3.dot(normal) <= 0f)
+      {
+        return;
+      }
+      
+      // If origin is outside (v1,v0,v3), then eliminate v2 and loop
+      if (v1.cross(v3).dot(v0) < 0f)
+      {
+        v2 = v3;
+        v21 = v31;
+        v22 = v32;
+        
+        normal = PVector.sub(v1, v0).cross(PVector.sub(v3, v0));
+        continue;
+      }
+      
+      // If origin is outside (v3,v0,v2), then eliminate v1 and loop
+      if (v3.cross(v2).dot(v0) < 0f)
+      {
+        v1 = v3;
+        v11 = v31;
+        v12 = v32;
+        
+        normal = PVector.sub(v3, v0).cross(PVector.sub(v2, v0));
+        continue;
+      }
+      
+      // Phase two: refine the portal - we are now inside of a wedge.
+      while (true)
+      {
+        phase2++;
+        
+        // Compute normal of the wedge face
+        normal = PVector.sub(v2, v1).cross(PVector.sub(v3, v1));
+        
+        // Just for good measure. If the normal is near-zero then we basically
+        // are on the plane.
+        if (normal.magSq() < EPSILON * EPSILON)
+        {
+          collisionDetected(first, second, point, normal, penetration);
+          return;
+        }
+        
+        normal.normalize();
+        
+        // If the origin is inside the wedge, we have a hit
+        if (!hit && normal.dot(v1) >= 0)
+        {
+          hit = true;
+        }
+        
+        // Find the support point in the direction of the wedge face
+        PVector v41 = supportMapTransformed(first, PVector.mult(normal, -1));
+        PVector v42 = supportMapTransformed(second, normal);
+        PVector v4 = PVector.sub(v42, v41);
+        
+        float delta = PVector.sub(v4, v3).dot(normal);
+        penetration = v4.dot(normal);
+        
+        if (delta <= COLLISION_EPSILON || penetration <= 0 || phase2 > MAX_ITERATIONS)
+        {
+          if (!hit)
+          {
+            return;
+          }
+          
+          float b0 = v1.cross(v2).dot(v3);
+          float b1 = v3.cross(v2).dot(v0);
+          float b2 = v0.cross(v1).dot(v3);
+          float b3 = v2.cross(v1).dot(v0);
+          
+          float sum = b0 + b1 + b2 + b3;
+          if (sum <= 0)
+          {
+            b0 = 0;
+            b1 = v2.cross(v3).dot(normal);
+            b2 = v3.cross(v1).dot(normal);
+            b3 = v1.cross(v2).dot(normal);
+            
+            sum = b1 + b2 + b3;
+          }
+          
+          float inverse = 1f / sum;
+          point = v01.mult(b0);
+          point.add(v11.mult(b1));
+          point.add(v21.mult(b2));
+          point.add(v31.mult(b3));
+          
+          point.add(v02.mult(b0));
+          point.add(v12.mult(b1));
+          point.add(v22.mult(b2));
+          point.add(v32.mult(b3));
+          
+          point.mult(inverse / 2f);
+          collisionDetected(first, second, point, normal, penetration);
+          return;
+        }
+        
+        // Compute the tetrahedron dividing face (v4,v0,v3)
+        PVector temp1 = v4.cross(v0);
+        float dot = temp1.dot(v1);
+        if (dot >= 0f)
+        {
+          dot = temp1.dot(v2);
+          if (dot >= 0f)
+          {
+            // Inside d1 and inside d2 => eliminate v1
+            v1 = v4;
+            v11 = v41;
+            v12 = v42;
+            continue;
+          }
+          
+          // Inside d1 and outside d2 => eliminate v3
+          v3 = v4;
+          v31 = v41;
+          v32 = v42;
+          continue;
+        }
+        
+        dot = temp1.dot(v3);
+        if (dot >= 0f)
+        {
+          // Outside d1 and inside d3 => eliminate v2
+          v2 = v4;
+          v21 = v41;
+          v22 = v42;
+          continue;
+        }
+        
+        // Outside d1 and outside d3 => eliminate v1
+        v1 = v4;
+        v11 = v41;
+        v12 = v42;
+      }
+    }
+  }
+  
+  private PVector supportMapTransformed(
+    Rigidbody rigidbody,
+    PVector direction)
+  {
+    Matrix3x3 orientation = rigidbody.getOrientation();
+    
+    PVector result = new PVector(
+      direction.x * orientation.m00 + direction.y * orientation.m01 + direction.z * orientation.m02,
+      -(direction.x * orientation.m10 + direction.y * orientation.m11 + direction.z * orientation.m12),
+      direction.x * orientation.m20 + direction.y * orientation.m21 + direction.z * orientation.m22);
+    
+    rigidbody.getCollisionShape().getSupportMapping(result);
+    
+    result = orientation.transform(result);
+    result.add(rigidbody.getPosition());
+    return result;
+  }
+  
+  private void collisionDetected(
+    Rigidbody first,
+    Rigidbody second,
+    PVector point,
+    PVector normal,
+    float penetration)
+  {
+    // TODO
+    println("We have a collision!!!");
+  }
+  
+  private static void swap(PVector one, PVector two)
+  {
+    float x = one.x;
+    float y = one.y;
+    float z = one.z;
+    
+    one.x = two.x;
+    one.y = two.y;
+    one.z = two.z;
+    two.x = x;
+    two.y = y;
+    two.z = z;
+  }
+}
+
+public interface CollisionShape
+{
+  void getSupportMapping(PVector direction);
+}
+
+public class SphereCollisionShape implements CollisionShape
+{
+  private final float radius;
+  
+  public SphereCollisionShape(float radius)
+  {
+    this.radius = radius;
+  }
+  
+  @Override
+  public void getSupportMapping(PVector direction)
+  {
+    direction.normalize();
+    direction.mult(radius);
+  }
+}
+
+public class CylinderShape implements CollisionShape
+{
+  private final float height;
+  private final float radius;
+  
+  public CylinderShape(float height, float radius)
+  {
+    this.height = height;
+    this.radius = radius;
+  }
+  
+  @Override
+  public void getSupportMapping(PVector direction)
+  {
+    float resultX;
+    float resultY;
+    float resultZ;
+    
+    float sigma = sqrt(direction.x * direction.x + direction.z * direction.z);
+    if (sigma > 0f)
+    {
+      resultX = direction.x / sigma * radius;
+      resultY = Math.signum(direction.y) * height / 2f;
+      resultZ = direction.z / sigma * radius;
+    }
+    else
+    {
+      resultX = 0f;
+      resultY = Math.signum(direction.y) * height / 2f;
+      resultZ = 0f;
+    }
+    
+    direction.set(resultX, resultY, resultZ);
+  }
+}
+
 public class Rigidbody
 {
   public static final float FORCE_SCALE = 100f;
@@ -151,6 +523,8 @@ public class Rigidbody
   private static final float GRAVITY_ACCELERATION = 9.81f;
   
   private final PShape mesh;
+  private final CollisionShape collisionShape;
+  
   protected final PVector position;
   private final Matrix3x3 orientation = new Matrix3x3();
   private final Matrix3x3 inertia = new Matrix3x3(); // TODO for now this is defined as the identity. Will come from shape.
@@ -169,15 +543,27 @@ public class Rigidbody
   private float linearDamping = 0f;
   private float angularDamping = 0f;
   
-  public Rigidbody(PShape mesh, PVector position)
+  public Rigidbody(PShape mesh, CollisionShape collisionShape, PVector position)
   {
     this.mesh = mesh;
+    this.collisionShape = collisionShape;
+    
     this.position = position;
+  }
+  
+  public CollisionShape getCollisionShape()
+  {
+    return collisionShape;
   }
   
   public PVector getPosition()
   {
     return position;
+  }
+  
+  public Matrix3x3 getOrientation()
+  {
+    return orientation;
   }
   
   public void setMass(float mass)
