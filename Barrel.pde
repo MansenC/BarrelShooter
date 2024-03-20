@@ -40,13 +40,47 @@ public class BarrelManager
    */
   private final List<Barrel> barrels = new ArrayList<>();
   
+  private float currentBarrelWeight = BARREL_WEIGHT_DEFAULT;
+  
   public BarrelManager(PVector origin)
   {
     cannonOrigin = origin;
   }
   
+  public void setBarrelWeight(float newWeight)
+  {
+    if (newWeight == 0)
+    {
+      return;
+    }
+    
+    currentBarrelWeight = newWeight;
+    for (Barrel barrel : barrels)
+    {
+      barrel.getRigidbody().setMass(newWeight);
+    }
+  }
+  
+  public int getBarrelCount()
+  {
+    return barrels.size();
+  }
+  
+  public void clearBarrels()
+  {
+    for (Barrel barrel : barrels)
+    {
+      PhysicsManager.removeRigidbody(barrel.getRigidbody());
+    }
+    
+    barrels.clear();
+  }
+  
   public void spawnBarrels(int amount)
   {
+    // We have an upper limit on attempts if the barrel amount is too large for the area we have.
+    int attemptsRemaining = amount * amount;
+    
     // We will spawn barrels randomly around the ocean.
     Random random = new Random();
     while (barrels.size() < amount)
@@ -80,13 +114,20 @@ public class BarrelManager
       
       if (failedDistanceCheck)
       {
+        attemptsRemaining--;
+        if (attemptsRemaining == 0)
+        {
+          // We've run out of attempts. Let's leave it here.
+          break;
+        }
+        
         // We have failed the distance check. Let's try again.
         continue;
       }
       
       // If not then we calculate the current ocean height and adjust the barrel's starting Y position accordingly.
       targetPosition.y = sampleOceanY(targetPosition.x, targetPosition.z);
-      barrels.add(new Barrel(targetPosition));
+      barrels.add(new Barrel(targetPosition, currentBarrelWeight));
     }
   }
   
@@ -113,9 +154,10 @@ public class Barrel
 {
   private final BarrelRigidbody rigidbody;
   
-  public Barrel(PVector position)
+  public Barrel(PVector position, float weight)
   {
     rigidbody = new BarrelRigidbody(position);
+    rigidbody.setMass(weight);
   }
   
   public Rigidbody getRigidbody()
@@ -136,7 +178,7 @@ public class BarrelRigidbody extends Rigidbody
    * The size of a voxel used for the buoyancy calculations. Subdivides the cylinder around
    * the barrel into <code>VOXEL_CYLINDER_SIZE / VOXEL_SIZE</code> voxels per side.
    */
-  private static final float VOXEL_SIZE = .25f; // .25f
+  private static final float VOXEL_SIZE = .25f;
   
   /**
    * The radius and height of our voxel cylinder.
@@ -168,8 +210,6 @@ public class BarrelRigidbody extends Rigidbody
     
     voxels = new Voxel[VOXEL_COUNT][VOXEL_COUNT][VOXEL_COUNT];
     initializeVoxels();
-    
-    setMass(1.5f);
     
     PhysicsManager.registerRigidbody(this);
   }
@@ -208,13 +248,11 @@ public class BarrelRigidbody extends Rigidbody
   @Override
   public void integrateForces()
   {
-    // We calculate the volume and density of our barrel first.
-    // Note that we have to factor down the size by the force scale here to stay accurate.
-    float volume = PI * (VOXEL_CYLINDER_SIZE / 2f) * (VOXEL_CYLINDER_SIZE / 2f) * VOXEL_CYLINDER_SIZE;
-    float density = volume * inverseMass;
-    
-    // This is the amount of force each voxel applies to our barrel.
-    float forcePerVoxel = (1f - density) / validVoxels;
+    // The density of water. Buoyancy force is defined as rho * g * V
+    // where rho is the density, g is the gravitational acceleration and
+    // V is the displaced volume.
+    // The density of seawater is around 1025 kg per cubic meter.
+    float rho = 1025f;
     float submergedVolume = 0f;
     
     // We have to perform the following calculations for each individual valid voxel.
@@ -237,19 +275,19 @@ public class BarrelRigidbody extends Rigidbody
           // From there on we calculate the depth of the voxel and how much of it is
           // approximately submerged. The depth measures to the top of the voxel.
           // Remember, y is inverted for some processing reason!
-          float depth = worldPosition.y - waterHeight + VOXEL_SIZE;
+          float depth = worldPosition.y - waterHeight;
           float submergedPercentage = constrain(depth / VOXEL_SIZE, 0f, 1f);
           
           // We now add the submerged percentage to the submerged volume.
           submergedVolume += submergedPercentage;
           
-          // The deeper we are, the bigger the displacement. Except for above the
-          // water, where we don't displace at all.
-          float displacement = max(depth, 0);
+          // The displacement is defined as the amount of volume of the voxel that is
+          // under water. In other words, it's our voxel volume multiplied by the submerged percentage.
+          float displacement = VOXEL_SIZE * VOXEL_SIZE * VOXEL_SIZE * submergedPercentage;
           
-          // We now calculate the force that we apply to the rigidbody.
-          PVector force = new PVector(0, 9.81f, 0);
-          force.mult(displacement * forcePerVoxel);
+          // We now calculate the force that we apply to the rigidbody. Hydrostatic pressure
+          // cancels out any non-vertical forces, buoyancy is actually just applied upwards.
+          PVector force = new PVector(0, rho * -9.81f * displacement, 0);
           
           // And we apply it orientation-based from our voxel position.
           addForceAtPoint(force, worldPosition);

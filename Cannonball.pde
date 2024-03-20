@@ -2,6 +2,9 @@
 // load the model new whenever a new cannonball is being shot.
 PShape cannonballShape;
 
+float cannonballWeight = CANNONBALL_WEIGHT_DEFAULT;
+float cannonballForce = CANNONBALL_FORCE_DEFAULT;
+
 /**
  * The cannonball is the projectile that should be aimed at the barrels in the sea.
  * The projectile carries an initial impulse that is applied when spawning (i.e. an
@@ -16,11 +19,6 @@ PShape cannonballShape;
  */
 public class Cannonball
 {
-  /**
-   * The cannonball's initial velocity.
-   */
-  private static final float CANNONBALL_VELOCITY = 14_000f;
-  
   /**
    * The rigidbody that takes over the calculations for our physics.
    */
@@ -42,7 +40,7 @@ public class Cannonball
   public Cannonball(PVector position, float yaw, float pitch)
   {
     rigidbody = new Rigidbody(cannonballShape, new SphereCollisionShape(.4f), position);
-    rigidbody.setMass(10);
+    rigidbody.setMass(cannonballWeight);
     
     PhysicsManager.registerRigidbody(rigidbody);
     
@@ -53,8 +51,13 @@ public class Cannonball
       sin(radiansPitch),
       sin(radiansYaw) * cos(radiansPitch));
       
-    initialImpulse.mult(CANNONBALL_VELOCITY);
+    initialImpulse.mult(cannonballForce);
     rigidbody.addForce(initialImpulse);
+  }
+  
+  public boolean isValid()
+  {
+    return valid;
   }
   
   /**
@@ -63,11 +66,13 @@ public class Cannonball
    */
   public void update()
   {
-    // if (rigidbody.getPosition().y > 21)
+    if (rigidbody.getPosition().y < 30)
     {
-      // rigidbody.setKinematic(false);
+      rigidbody.draw();
+      return;
     }
     
-    rigidbody.draw();
+    valid = false;
+    PhysicsManager.removeRigidbody(rigidbody);
   }
 }

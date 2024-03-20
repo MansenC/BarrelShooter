@@ -1,17 +1,12 @@
 /**
- * Whether or not the ocean stays at a fixed position.
- */
-private static final boolean FIXED_OCEAN = false;
-
-/**
  * The speed of the waves in the ocean.
  */
-private float oceanWaveSpeed = 0.05f;
+private float oceanWaveSpeed = WAVE_SPEED_DEFAULT;
 
 /**
  * The total scale of the ocean wave height.
  */
-private float oceanWaveScale = 0.2f;
+private float oceanWaveScale = WAVE_SCALE_DEFAULT;
 
 /**
  * The time modifier of the ocean in the X direction.
@@ -26,12 +21,12 @@ private float oceanTimeZ = 0f;
 /**
  * The individual amplitudes of the waves.
  */
-private final float[] oceanWaveAmplitudes = new float[] { 0.1f, 0.05f, 0.05f, 0.025f };
+private final float[] oceanWaveAmplitudes = WAVE_AMPLITUDES_DEFAULT;
 
 /**
  * The individual wave frequencies of the water.
  */
-private final float[] oceanWaveFrequencies = new float[] { 1.0f / 2.0f, 1.0f / 4.0f, 1.0f / 8.0f, 1.0f / 10.0f };
+private final float[] oceanWaveFrequencies = WAVE_FREQUENCIES_DEFAULT;
 
 /**
  * The size of the ocean.
@@ -266,7 +261,7 @@ public class Environment
    */
   private void renderOcean()
   {
-    float currentTime = FIXED_OCEAN ? 0f : millis() / 1_000f;
+    float currentTime = frameTime / 1_000f;
     
     // The way we tell the ocean in which direction to move is by modifying the "time" in x and z directions
     // differently. For example, moving in X+ and Z- means "forwarding" time in X and "rewinding" time in Z.

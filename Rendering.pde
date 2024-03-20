@@ -175,6 +175,18 @@ public class Camera
       freecam = !freecam;
     }
     
+    // CTRL+P is used to pause/resume the game for inspection. We cannot change the paused
+    // state when we're viewing the UI.
+    if (!ui.isVisible() && (isCombinationPressed(CONTROL, 80) || isCombinationPressed(CONTROL, 'p')))
+    {
+      togglePaused();
+    }
+    
+    if (isCombinationPressed(CONTROL, 88) || isCombinationPressed(CONTROL, 'x'))
+    {
+      ui.toggleVisibility();
+    }
+    
     // We convert our yaw/pitch into a look-direction on a unit sphere here.
     PVector lookDirection = getLookDirection();
     

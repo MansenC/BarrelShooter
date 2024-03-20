@@ -16,7 +16,7 @@ public static final float PHYSICS_DELTA = 1f / 50;
  * @author HERE_YOUR_FULL_NAME_TODO
  */
 public static class PhysicsManager
-{ 
+{
   /**
    * Whether or not the physics are updated or not.
    */
@@ -88,8 +88,6 @@ public static class PhysicsManager
     }
   }
   
-  public static volatile boolean physicsFrame = true;
-  
   /**
    * Executes the physics loop.
    */
@@ -100,6 +98,27 @@ public static class PhysicsManager
     long beforeExecutionTime;
     while (running)
     {
+      synchronized (PAUSE_LOCK)
+      {
+        if (paused)
+        {
+          try
+          {
+            PAUSE_LOCK.wait();
+          }
+          catch (InterruptedException ex)
+          {
+            ex.printStackTrace();
+            Thread.currentThread().interrupt();
+          }
+          
+          if (!running)
+          {
+            break;
+          }
+        }
+      }
+      
       beforeExecutionTime = System.currentTimeMillis();
       updateRigidbodies();
       
@@ -115,24 +134,18 @@ public static class PhysicsManager
         continue;
       }
       
-      do
+      try
       {
-        try
-        {
-          // Actually sleep.
-          Thread.sleep(sleepDelta);
-        }
-        catch (InterruptedException ex)
-        {
-          ex.printStackTrace();
-          
-          // It is good practice to interrupt the running thread if the wait was interrupted.
-          Thread.currentThread().interrupt();
-        }
+        // Actually sleep.
+        Thread.sleep(sleepDelta);
       }
-      while (!physicsFrame);
-      
-      physicsFrame = true;
+      catch (InterruptedException ex)
+      {
+        ex.printStackTrace();
+        
+        // It is good practice to interrupt the running thread if the wait was interrupted.
+        Thread.currentThread().interrupt();
+      }
     }
   }
   
@@ -482,18 +495,34 @@ public static class CollisionManager
   }
 }
 
-public interface CollisionShape
+public abstract class CollisionShape
 {
-  void getSupportMapping(PVector direction);
+  protected Matrix3x3 inertia;
+  protected float mass;
+  
+  public abstract void getSupportMapping(PVector direction);
+  
+  public abstract void calculateMassInertia();
+  
+  public Matrix3x3 getInertia()
+  {
+    return inertia;
+  }
+  
+  public float getMass()
+  {
+    return mass;
+  }
 }
 
-public class SphereCollisionShape implements CollisionShape
+public class SphereCollisionShape extends CollisionShape
 {
   private final float radius;
   
   public SphereCollisionShape(float radius)
   {
     this.radius = radius;
+    calculateMassInertia();
   }
   
   @Override
@@ -502,9 +531,19 @@ public class SphereCollisionShape implements CollisionShape
     direction.normalize();
     direction.mult(radius);
   }
+  
+  @Override
+  public void calculateMassInertia()
+  {
+    mass = (4f / 3f) * PI * radius * radius * radius;
+    
+    inertia = new Matrix3x3();
+    inertia.m00 = 0.4f * mass * radius * radius;
+    inertia.m22 = inertia.m11 = inertia.m00;
+  }
 }
 
-public class CylinderShape implements CollisionShape
+public class CylinderShape extends CollisionShape
 {
   private final float height;
   private final float radius;
@@ -513,6 +552,7 @@ public class CylinderShape implements CollisionShape
   {
     this.height = height;
     this.radius = radius;
+    calculateMassInertia();
   }
   
   @Override
@@ -538,6 +578,17 @@ public class CylinderShape implements CollisionShape
     
     direction.set(resultX, resultY, resultZ);
   }
+  
+  @Override
+  public void calculateMassInertia()
+  {
+    mass = PI * radius * radius * height;
+    
+    inertia = new Matrix3x3();
+    inertia.m00 = (1f / 4f) * mass * radius * radius + (1f / 12f) * mass * height * height;
+    inertia.m11 = (1f / 2f) * mass * radius * radius;
+    inertia.m22 = inertia.m00;
+  }
 }
 
 public class Rigidbody
@@ -549,15 +600,15 @@ public class Rigidbody
   
   protected final PVector position;
   private final Matrix3x3 orientation = new Matrix3x3();
-  private final Matrix3x3 inertia = new Matrix3x3(); // TODO for now this is defined as the identity. Will come from shape.
-  private final Matrix3x3 inverseInertia = new Matrix3x3();
+  private Matrix3x3 inertia;
+  private Matrix3x3 inverseInertia;
   private Matrix3x3 inverseOrientation = new Matrix3x3();
   private Matrix3x3 inverseInertiaWorld = new Matrix3x3(); // inverse inertia tensor in world space
   
   protected final PVector force = new PVector();
   protected final PVector torque = new PVector();
   private final PVector linearVelocity = new PVector();
-  private final PVector angularVelocity = new PVector();
+  protected final PVector angularVelocity = new PVector();
   
   private boolean kinematic = true;
   private boolean gravity = true;
@@ -571,6 +622,10 @@ public class Rigidbody
     this.collisionShape = collisionShape;
     
     this.position = position;
+    
+    inertia = collisionShape.getInertia();
+    inverseInertia = inertia.inverse();
+    inverseMass = 1f / collisionShape.getMass();
   }
   
   public void setKinematic(boolean kinematic)
@@ -615,6 +670,8 @@ public class Rigidbody
   
   public void setMass(float mass)
   {
+    inertia = collisionShape.getInertia().mult(mass / collisionShape.getMass());
+    inverseInertia = inertia.inverse();
     inverseMass = 1f / mass;
   }
   
@@ -721,8 +778,6 @@ public class Rigidbody
   public synchronized void update()
   {
     inverseOrientation = orientation.transpose();
-    // Update bounding box?
-    
     inverseInertiaWorld = inverseOrientation.mult(inverseInertia).mult(orientation);
   }
   
@@ -762,12 +817,71 @@ public class Matrix3x3
     m22 = 1f;
   }
   
+  public void clear()
+  {
+    m00 = m01 = m02 = m10 = m11 = m12 = m20 = m21 = m22 = 0;
+  }
+  
+  public float determinant()
+  {
+    return m00 * m11 * m22
+      + m01 * m12 * m20
+      + m02 * m10 * m21
+      - m20 * m11 * m02
+      - m21 * m12 * m00
+      - m22 * m10 * m01;
+  }
+  
+  public Matrix3x3 inverse()
+  {
+    Matrix3x3 result = new Matrix3x3();
+    float inverseDeterminant = 1f / determinant();
+    
+    result.m00 = (m11 * m22 - m12 * m21) * inverseDeterminant;
+    result.m01 = (m02 * m21 - m22 * m01) * inverseDeterminant;
+    result.m02 = (m01 * m12 - m11 * m02) * inverseDeterminant;
+    result.m10 = (m12 * m20 - m10 * m22) * inverseDeterminant;
+    result.m11 = (m00 * m22 - m02 * m20) * inverseDeterminant;
+    result.m12 = (m02 * m10 - m00 * m12) * inverseDeterminant;
+    result.m20 = (m10 * m21 - m11 * m20) * inverseDeterminant;
+    result.m21 = (m01 * m20 - m00 * m21) * inverseDeterminant;
+    result.m22 = (m00 * m11 - m01 * m10) * inverseDeterminant;
+    
+    return result;
+  }
+  
   public PVector transform(PVector position)
   {
     return new PVector(
       position.x * m00 + position.y * m10 + position.z * m20,
       -(position.x * m01 + position.y * m11 + position.z * m21),
       position.x * m02 + position.y * m12 + position.z * m22);
+  }
+  
+  public void add(Matrix3x3 other)
+  {
+    m00 += other.m00;
+    m01 += other.m01;
+    m02 += other.m02;
+    m10 += other.m10;
+    m11 += other.m11;
+    m12 += other.m12;
+    m20 += other.m20;
+    m21 += other.m21;
+    m22 += other.m22;
+  }
+  
+  public void sub(Matrix3x3 other)
+  {
+    m00 -= other.m00;
+    m01 -= other.m01;
+    m02 -= other.m02;
+    m10 -= other.m10;
+    m11 -= other.m11;
+    m12 -= other.m12;
+    m20 -= other.m20;
+    m21 -= other.m21;
+    m22 -= other.m22;
   }
   
   public Matrix3x3 mult(Matrix3x3 other)
@@ -783,6 +897,23 @@ public class Matrix3x3
     target.m20 = m20 * other.m00 + m21 * other.m10 + m22 * other.m20;
     target.m21 = m20 * other.m01 + m21 * other.m11 + m22 * other.m21;
     target.m22 = m20 * other.m02 + m21 * other.m12 + m22 * other.m22;
+    
+    return target;
+  }
+  
+  public Matrix3x3 mult(float factor)
+  {
+    Matrix3x3 target = new Matrix3x3();
+    
+    target.m00 = m00 * factor;
+    target.m01 = m01 * factor;
+    target.m02 = m02 * factor;
+    target.m10 = m10 * factor;
+    target.m11 = m11 * factor;
+    target.m12 = m12 * factor;
+    target.m20 = m20 * factor;
+    target.m21 = m21 * factor;
+    target.m22 = m22 * factor;
     
     return target;
   }

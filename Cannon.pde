@@ -154,7 +154,7 @@ public class Cannon
     // If the left mouse button was pressed then we shoot a cannonball.
     // We do this here since we don't have to the transformation for spawning
     // the ball inside the barrel again.
-    if (isMouseButtonPressed(LEFT))
+    if (!paused && isMouseButtonPressed(LEFT))
     {
       PVector ballSpawnLocation = new PVector(
         modelX(0, 3, 0),
@@ -181,10 +181,19 @@ public class Cannon
     popMatrix();
     
     // We finally update all cannonballs.
+    List<Cannonball> invalidatedBalls = new ArrayList<>();
     for (Cannonball ball : balls)
     {
       ball.update();
+      if (ball.isValid())
+      {
+        continue;
+      }
+      
+      invalidatedBalls.add(ball);
     }
+    
+    balls.removeAll(invalidatedBalls);
   }
   
   /**
