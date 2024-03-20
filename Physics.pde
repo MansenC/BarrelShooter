@@ -439,8 +439,32 @@ public static class CollisionManager
     PVector normal,
     float penetration)
   {
-    // TODO
-    println("We have a collision!!!");
+    // Point is global, normal relative to point
+    // For implementation, see https://en.wikipedia.org/wiki/Collision_response#Computing_impulse-based_reaction
+    // We assume the coefficient of restitution is 1, therefor no friction losses.
+    
+    // Also inertia tensors may be world-relative!
+    PVector firstCollisionDirection = PVector.sub(point, first.getPosition());
+    PVector secondCollisionDirection = PVector.sub(point, second.getPosition());
+    
+    // This calculates the pre-collision velocities at the point of contact for each rigidbody.
+    PVector firstCollisionVelocity = PVector.add(first.getVelocity(), first.getAngularVelocity().cross(firstCollisionDirection));
+    PVector secondCollisionVelocity = PVector.add(second.getVelocity(), second.getAngularVelocity().cross(secondCollisionDirection));
+    
+    PVector relativeVelocity = PVector.sub(secondCollisionVelocity, firstCollisionVelocity);
+    
+    PVector relativeInertia = first.getInverseInertia().transform(firstCollisionDirection.cross(normal)).cross(firstCollisionDirection);
+    relativeInertia.add(second.getInverseInertia().transform(secondCollisionDirection.cross(normal)).cross(secondCollisionDirection));
+    
+    float inertiaScale = relativeInertia.dot(normal);
+    float magnitudeDenominator = first.getInverseMass() + second.getInverseMass() + inertiaScale;
+    
+    float impulseMagnitude = PVector.mult(relativeVelocity, -2).dot(normal) / magnitudeDenominator;
+    PVector impulseVector = PVector.mult(normal, impulseMagnitude);
+    
+    // Newton's third law here.
+    second.addImpulseAtPoint(impulseVector, point);
+    first.addImpulseAtPoint(impulseVector.mult(-1), point);
   }
   
   private static void swap(PVector one, PVector two)
@@ -518,8 +542,6 @@ public class CylinderShape implements CollisionShape
 
 public class Rigidbody
 {
-  public static final float FORCE_SCALE = 100f;
-  
   private static final float GRAVITY_ACCELERATION = 9.81f;
   
   private final PShape mesh;
@@ -532,8 +554,8 @@ public class Rigidbody
   private Matrix3x3 inverseOrientation = new Matrix3x3();
   private Matrix3x3 inverseInertiaWorld = new Matrix3x3(); // inverse inertia tensor in world space
   
-  private final PVector force = new PVector();
-  private final PVector torque = new PVector();
+  protected final PVector force = new PVector();
+  protected final PVector torque = new PVector();
   private final PVector linearVelocity = new PVector();
   private final PVector angularVelocity = new PVector();
   
@@ -551,14 +573,39 @@ public class Rigidbody
     this.position = position;
   }
   
+  public void setKinematic(boolean kinematic)
+  {
+    this.kinematic = kinematic;
+  }
+  
   public CollisionShape getCollisionShape()
   {
     return collisionShape;
   }
   
+  public float getInverseMass()
+  {
+    return inverseMass;
+  }
+  
   public PVector getPosition()
   {
     return position;
+  }
+  
+  public PVector getVelocity()
+  {
+    return linearVelocity;
+  }
+  
+  public PVector getAngularVelocity()
+  {
+    return angularVelocity;
+  }
+  
+  public Matrix3x3 getInverseInertia()
+  {
+    return inverseInertia;
   }
   
   public Matrix3x3 getOrientation()
@@ -585,8 +632,16 @@ public class Rigidbody
   {
     this.force.add(force);
     
-    point.sub(position).mult(1f / FORCE_SCALE);
+    point.sub(position);
     torque.add(point.cross(force));
+  }
+  
+  public synchronized void addImpulseAtPoint(PVector impulse, PVector point)
+  {
+    linearVelocity.add(PVector.mult(impulse, inverseMass));
+    
+    PVector relativePosition = PVector.sub(point, position);
+    angularVelocity.add(inverseInertiaWorld.transform(relativePosition.cross(impulse)));
   }
   
   public PVector transformLocalPosition(PVector localPosition)
@@ -614,10 +669,10 @@ public class Rigidbody
     }
     
     // Handle linear velocity
-    linearVelocity.add(force.mult(inverseMass * PHYSICS_DELTA * FORCE_SCALE));
+    linearVelocity.add(force.mult(inverseMass * PHYSICS_DELTA));
     if (gravity)
     {
-      linearVelocity.add(0, GRAVITY_ACCELERATION * PHYSICS_DELTA * FORCE_SCALE, 0);
+      linearVelocity.add(0, GRAVITY_ACCELERATION * PHYSICS_DELTA, 0);
     }
     
     // Handle angular velocity

@@ -24,10 +24,10 @@ void setup()
   PhysicsManager.start();
   
   // We initialize everything.
-  camera = new Camera(new PVector(-4175, 905, 333));
+  camera = new Camera(new PVector(-41.75f, 9.05f, 3.33f));
   environment = new Environment();
-  cannon = new Cannon(new PVector(-3000, 1040, 333));
-  barrelManager = new BarrelManager(new PVector(-3000, 1040, 333));
+  cannon = new Cannon(new PVector(-30, 10.4f, 3.33f));
+  barrelManager = new BarrelManager(new PVector(-30, 10.4f, 3.33f));
   
   camera.setCursorLocked(true);
   
@@ -53,15 +53,16 @@ void draw()
   // First we handle the environment. This includes lighting.
   environment.update();
   
-  // Then it's time for the barrels
+  // Then it's time for the barrels and cannon.
   barrelManager.update();
-  
-  // After that we draw the cannon. The reason why it's last is simply the UI. Otherwise
-  // any objects drawn beforehand would get rendered above the UI layer.
   cannon.update();
   
   // Lastly we update our camera, process the input and update the position.
   camera.update();
+  
+  // After that we draw the UI. The reason why it's last is simply that
+  // any objects drawn beforehand would get rendered above the UI layer.
+  cannon.drawGUI();
   
   if (isKeyPressed('i'))
   {

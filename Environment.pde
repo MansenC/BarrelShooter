@@ -6,37 +6,52 @@ private static final boolean FIXED_OCEAN = false;
 /**
  * The speed of the waves in the ocean.
  */
-private static final float OCEAN_WAVE_SPEED = 0.05f;
-
-/**
- * The amount of waves in total, layered above each other.
- */
-private static final int OCEAN_WAVE_COUNT = 5;
+private float oceanWaveSpeed = 0.05f;
 
 /**
  * The total scale of the ocean wave height.
  */
-private static final float OCEAN_WAVE_SCALE = 0.2f;
+private float oceanWaveScale = 0.2f;
+
+/**
+ * The time modifier of the ocean in the X direction.
+ */
+private float oceanTimeX = 0f;
+
+/**
+ * The time modifier of the ocean in the Z direction.
+ */
+private float oceanTimeZ = 0f;
 
 /**
  * The individual amplitudes of the waves.
  */
-private static final float[] OCEAN_WAVE_AMPLITUDES = new float[] { 0.1f, 0.05f, 0.05f, 0.025f, 0.01f };
+private final float[] oceanWaveAmplitudes = new float[] { 0.1f, 0.05f, 0.05f, 0.025f };
 
 /**
  * The individual wave frequencies of the water.
  */
-private static final float[] OCEAN_WAVE_FREQUENCIES = new float[] { 1.0f, 1.0f / 2.0f, 1.0f / 4.0f, 1.0f / 5.0f, 1.0f / 7.0f };
+private final float[] oceanWaveFrequencies = new float[] { 1.0f / 2.0f, 1.0f / 4.0f, 1.0f / 8.0f, 1.0f / 10.0f };
 
 /**
  * The size of the ocean.
  */
-private static final float OCEAN_SCALE = 10_000f;
+private static final float OCEAN_SCALE = 100f;
 
 /**
  * The Y offset of the ocean.
  */
-private static final float OCEAN_Y_OFFSET = 2_000f;
+private static final float OCEAN_Y_OFFSET = 20f;
+
+/**
+ * The current velocity of the ocean in the +X direction.
+ */
+private float oceanSpeedX;
+
+/**
+ * The current velocity of the ocean in the +Z direction.
+ */
+private float oceanSpeedZ;
 
 /**
  * Sampels the ocean's y level at a global X|Z coordinate. Will return a global Y position.
@@ -47,19 +62,51 @@ private static final float OCEAN_Y_OFFSET = 2_000f;
  */
 public float sampleOceanY(float x, float z)
 {
+  // This is a translation of our ocean vertex shader, used for a low amount of points only.
   float oceanLocalX = x / OCEAN_SCALE;
   float oceanLocalZ = z / OCEAN_SCALE;
   
-  float time = FIXED_OCEAN ? 0 : millis() / 1_000f;
   float currentWave = 0;
-  for (int i = 0; i < OCEAN_WAVE_COUNT; i++)
+  for (int i = 0; i < oceanWaveAmplitudes.length; i++)
   {
-    currentWave += OCEAN_WAVE_AMPLITUDES[i]
-      * sin((oceanLocalX + time * OCEAN_WAVE_SPEED) * 2f / OCEAN_WAVE_FREQUENCIES[i])
-      * cos((oceanLocalZ + time * OCEAN_WAVE_SPEED) * 2.6f / OCEAN_WAVE_FREQUENCIES[i]);
+    float xComponent = sin((oceanLocalX + oceanTimeX * oceanWaveSpeed) / oceanWaveFrequencies[i]);
+    float zComponent = cos((oceanLocalZ + oceanTimeZ * oceanWaveSpeed) / oceanWaveFrequencies[i]);
+    
+    currentWave += oceanWaveAmplitudes[i] * (xComponent * zComponent);
   }
   
-  return OCEAN_Y_OFFSET - OCEAN_SCALE * currentWave * OCEAN_WAVE_SCALE;
+  return OCEAN_Y_OFFSET - OCEAN_SCALE * currentWave * oceanWaveScale;
+}
+
+/**
+ * Calculates the pressure of a wave in the current flow direction of the ocean at a given point.
+ * Note that this is entirely a very crude approximation of how real physics work, since the pressure
+ * of a wave is determined by an extremely complex computational model which we simply cannot support.
+ *
+ * This approximation calculates the derivative of the ocean plane at a given point in the direction
+ * of flow of the ocean. Theoretically, the pressure of the wave is highest on the tip of the wave
+ * but that one is rough to calculate so we just say the higher the derivative, the higher the pressure.
+ *
+ * @param x The x position to calculate the pressure around.
+ * @param z The z position to calculate the pressure around.
+ * @returns A vector representing the force applied to an object in the ocean at that current point.
+ */
+public PVector calculateOceanFlowPressure(float x, float z)
+{
+  final float stepSize = 0.1f;
+  
+  float oceanYBehind = sampleOceanY(x - oceanSpeedX * stepSize, z - oceanSpeedZ * stepSize);
+  float oceanYAhead = sampleOceanY(x + oceanSpeedX * stepSize, z + oceanSpeedZ * stepSize);
+  
+  // This is our approximated slope at that point.
+  float derivative = (oceanYAhead - oceanYBehind) / (2f * stepSize);
+  
+  // Note that angle is in radians
+  float angle = abs(atan(derivative));
+  
+  // Also note that the way we define the wave velocity requires this
+  // to be inverted.
+  return new PVector(-oceanSpeedX * angle, 0, -oceanSpeedZ * angle);
 }
 
 /**
@@ -73,27 +120,27 @@ public class Environment
   /**
    * The size of the ocean's far plane.
    */
-  private static final int OCEAN_FAR_SIZE = 250_000;
+  private static final int OCEAN_FAR_SIZE = 2_500;
   
   /**
    * The size of the skybox that contains clouds.
    */
-  private static final int SKYBOX_NEAR_SIZE = 250_000;
+  private static final int SKYBOX_NEAR_SIZE = 2_500;
   
   /**
    * The height of the skybox that contains clouds.
    */
-  private static final int SKYBOX_NEAR_HEIGHT = 100_000;
+  private static final int SKYBOX_NEAR_HEIGHT = 1_000;
   
   /**
    * The size of the skybox backdrop.
    */
-  private static final int SKYBOX_FAR_SIZE = 500_000;
+  private static final int SKYBOX_FAR_SIZE = 5_000;
   
   /**
    * The height of the skybox backdrop.
    */
-  private static final int SKYBOX_FAR_HEIGHT = 5_000_000;
+  private static final int SKYBOX_FAR_HEIGHT = 50_000;
   
   /**
    * A constant used in calculating the center point distance of a given hexagon.
@@ -196,7 +243,7 @@ public class Environment
     pushMatrix();
     
     // Moving everything slightly up makes the clouds start actually in the sky.
-    translate(0, -20_000, 0);
+    translate(0, -200, 0);
     
     // We rotate it so the seam in the texture can't be seen. It's a beta texture after all
     rotateY(PI);
@@ -219,6 +266,15 @@ public class Environment
    */
   private void renderOcean()
   {
+    float currentTime = FIXED_OCEAN ? 0f : millis() / 1_000f;
+    
+    // The way we tell the ocean in which direction to move is by modifying the "time" in x and z directions
+    // differently. For example, moving in X+ and Z- means "forwarding" time in X and "rewinding" time in Z.
+    oceanSpeedX = 2 * cos(currentTime / 10f);
+    oceanSpeedZ = 2 * sin(currentTime / 10f);
+    oceanTimeX += oceanSpeedX * deltaTime;
+    oceanTimeZ += oceanSpeedZ * deltaTime;
+    
     shader(oceanFarShader);
     oceanFarShader.set("lighterColor", 105 / 255f, 137 / 255f, 235 / 255f);
     oceanFarShader.set("darkerColor", 37 / 255f, 54 / 255f, 156 / 255f);
@@ -226,7 +282,7 @@ public class Environment
     
     pushMatrix();
     
-    translate(0, 2500, 0);
+    translate(0, 25, 0);
     
     beginShape();
     
@@ -243,7 +299,14 @@ public class Environment
     textureWrap(REPEAT);
     oceanNearShader.set("foamTexture", oceanVoronoi);
     oceanNearShader.set("flowMap", flowMap);
-    oceanNearShader.set("time", FIXED_OCEAN ? 0f : millis() / 1_000f);
+    oceanNearShader.set("time", currentTime);
+    
+    oceanNearShader.set("waveSpeed", oceanWaveSpeed);
+    oceanNearShader.set("waveScale", oceanWaveScale);
+    oceanNearShader.set("directedTime", oceanTimeX, oceanTimeZ);
+    
+    oceanNearShader.set("amplitudes", oceanWaveAmplitudes[0], oceanWaveAmplitudes[1], oceanWaveAmplitudes[2], oceanWaveAmplitudes[3]);
+    oceanNearShader.set("frequencies", oceanWaveFrequencies[0], oceanWaveFrequencies[1], oceanWaveFrequencies[2], oceanWaveFrequencies[3]);
     
     pushMatrix();
     
@@ -267,8 +330,7 @@ public class Environment
   {
     pushMatrix();
     
-    translate(-5000, 2100, 0);
-    scale(100);
+    translate(-50, 21, 0);
     rotateX(PI);
     
     shape(island);

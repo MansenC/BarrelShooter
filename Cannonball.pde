@@ -19,7 +19,7 @@ public class Cannonball
   /**
    * The cannonball's initial velocity.
    */
-  private static final float CANNONBALL_VELOCITY = 1_400f;
+  private static final float CANNONBALL_VELOCITY = 14_000f;
   
   /**
    * The rigidbody that takes over the calculations for our physics.
@@ -41,7 +41,9 @@ public class Cannonball
    */
   public Cannonball(PVector position, float yaw, float pitch)
   {
-    rigidbody = new Rigidbody(cannonballShape, new SphereCollisionShape(40f), position);
+    rigidbody = new Rigidbody(cannonballShape, new SphereCollisionShape(.4f), position);
+    rigidbody.setMass(10);
+    
     PhysicsManager.registerRigidbody(rigidbody);
     
     float radiansYaw = radians(yaw);
@@ -61,7 +63,7 @@ public class Cannonball
    */
   public void update()
   {
-    // if (rigidbody.getPosition().y > 2100)
+    // if (rigidbody.getPosition().y > 21)
     {
       // rigidbody.setKinematic(false);
     }

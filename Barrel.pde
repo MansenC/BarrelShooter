@@ -12,12 +12,12 @@ public class BarrelManager
   /**
    * The starting position of barrel spawning. This is the smaller circle of the spawning area.
    */
-  private static final float BARREL_SPAWN_X_START = 4_000;
+  private static final float BARREL_SPAWN_X_START = 40;
   
   /**
    * The ending position of barrel spawning. This is the larger circle of the spawning area.
    */
-  private static final float BARREL_SPAWN_X_END = 9_000;
+  private static final float BARREL_SPAWN_X_END = 90;
   
   /**
    * The maximum (and inverted minimum) angle of difference at which barrels can spawn.
@@ -27,7 +27,7 @@ public class BarrelManager
   /**
    * The minimum distance between two barrels (X/Z).
    */
-  private static final float BARREL_MIN_DISTANCE = 400f;
+  private static final float BARREL_MIN_DISTANCE = 4f;
   
   /**
    * The cannon origin describes the center point of the circles that describe the boundary
@@ -136,14 +136,14 @@ public class BarrelRigidbody extends Rigidbody
    * The size of a voxel used for the buoyancy calculations. Subdivides the cylinder around
    * the barrel into <code>VOXEL_CYLINDER_SIZE / VOXEL_SIZE</code> voxels per side.
    */
-  private static final float VOXEL_SIZE = 25f;
+  private static final float VOXEL_SIZE = .25f; // .25f
   
   /**
    * The radius and height of our voxel cylinder.
    * Note: This value is hard-coded and based on the shape of our barrel. The barrel fits
    * inside a 200x200x200 cube.
    */
-  private static final float VOXEL_CYLINDER_SIZE = 200;
+  private static final float VOXEL_CYLINDER_SIZE = 2;
   
   /**
    * The actual amount of voxels per side we have to store.
@@ -164,12 +164,12 @@ public class BarrelRigidbody extends Rigidbody
   
   public BarrelRigidbody(PVector position)
   {
-    super(barrelShape, new CylinderShape(200, 100), position);
+    super(barrelShape, new CylinderShape(2, 1), position);
     
     voxels = new Voxel[VOXEL_COUNT][VOXEL_COUNT][VOXEL_COUNT];
     initializeVoxels();
     
-    setMass(30f);
+    setMass(1.5f);
     
     PhysicsManager.registerRigidbody(this);
   }
@@ -191,7 +191,7 @@ public class BarrelRigidbody extends Rigidbody
           
           PVector worldPosition = transformLocalPosition(voxels[x][y][z].getPosition());
           translate(worldPosition.x, worldPosition.y, worldPosition.z);
-          box(VOXEL_SIZE - 1);
+          box(VOXEL_SIZE - .01f);
           
           popMatrix();
         }
@@ -210,7 +210,7 @@ public class BarrelRigidbody extends Rigidbody
   {
     // We calculate the volume and density of our barrel first.
     // Note that we have to factor down the size by the force scale here to stay accurate.
-    float volume = PI * (VOXEL_CYLINDER_SIZE / FORCE_SCALE / 2f) * (VOXEL_CYLINDER_SIZE / FORCE_SCALE / 2f) * VOXEL_CYLINDER_SIZE / FORCE_SCALE;
+    float volume = PI * (VOXEL_CYLINDER_SIZE / 2f) * (VOXEL_CYLINDER_SIZE / 2f) * VOXEL_CYLINDER_SIZE;
     float density = volume * inverseMass;
     
     // This is the amount of force each voxel applies to our barrel.
@@ -248,7 +248,7 @@ public class BarrelRigidbody extends Rigidbody
           float displacement = max(depth, 0);
           
           // We now calculate the force that we apply to the rigidbody.
-          PVector force = new PVector(0, -9.81f, 0);
+          PVector force = new PVector(0, 9.81f, 0);
           force.mult(displacement * forcePerVoxel);
           
           // And we apply it orientation-based from our voxel position.
@@ -263,6 +263,10 @@ public class BarrelRigidbody extends Rigidbody
     
     setLinearDamping(lerp(0.0f, 1.0f, submergedVolume));
     setAngularDamping(lerp(0.05f, 1.0f, submergedVolume));
+    
+    // Finally we need to calculate the force the ocean applies to our barrel.
+    PVector oceanForce = calculateOceanFlowPressure(position.x, position.z);
+    addForce(oceanForce);
     
     // We update our rigidbody data as the last thing we do, in order to apply our calculations
     // immediately.

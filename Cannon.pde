@@ -24,7 +24,7 @@ public class Cannon
   /**
    * The minimum vertical angle the cannon can shoot at.
    */
-  private static final float CANNON_MIN_VERTICAL_ANGLE = 0;
+  private static final float CANNON_MIN_VERTICAL_ANGLE = -5;
   
   /**
    * The maximum vertical angle the cannon can shoot at.
@@ -144,7 +144,7 @@ public class Cannon
     // We need to rotate and translate the cannon so that the metal beam stays fixed in place
     // relative to its wagon.
     float radiansAngle = (cannonVerticalRotation - 90) * PI / 180;
-    translate(100 * sin(radiansAngle), 100 * (1 - cos(radiansAngle)), 0);
+    translate(sin(radiansAngle), 1 - cos(radiansAngle), 0);
     rotateZ(radiansAngle);
     
     // The scope should be on the upper side.
@@ -157,9 +157,9 @@ public class Cannon
     if (isMouseButtonPressed(LEFT))
     {
       PVector ballSpawnLocation = new PVector(
-        modelX(0, 300, 0),
-        modelY(0, 300, 0),
-        modelZ(0, 300, 0));
+        modelX(0, 3, 0),
+        modelY(0, 3, 0),
+        modelZ(0, 3, 0));
       balls.add(new Cannonball(ballSpawnLocation, cannonHorizontalRotation, cannonVerticalRotation));
     }
     
@@ -173,9 +173,9 @@ public class Cannon
       camera.setYaw(cannonHorizontalRotation);
       camera.setPitch(25);
       camera.setPosition(
-        modelX(-200, 400, 0),
-        modelY(-200, 400, 0),
-        modelZ(-200, 400, 0));
+        modelX(-2, 4, 0),
+        modelY(-2, 4, 0),
+        modelZ(-2, 4, 0));
     }
     
     popMatrix();
@@ -185,36 +185,6 @@ public class Cannon
     {
       ball.update();
     }
-    
-    drawGUI();
-  }
-  
-  /**
-   * Handles the user's input for controlling the cannon. W turns the cannon up, S down,
-   * A turns left, D turns right and left click shoots the cannon.
-   */
-  private void handleUserInput()
-  {
-    if (isKeyDown('w'))
-    {
-      cannonVerticalRotation += deltaTime * 10;
-    }
-    else if (isKeyDown('s'))
-    {
-      cannonVerticalRotation -= deltaTime * 10;
-    }
-    
-    if (isKeyDown('a'))
-    {
-      cannonHorizontalRotation -= deltaTime * 10;
-    }
-    else if (isKeyDown('d'))
-    {
-      cannonHorizontalRotation += deltaTime * 10;
-    }
-    
-    cannonVerticalRotation = constrain(cannonVerticalRotation, CANNON_MIN_VERTICAL_ANGLE, CANNON_MAX_VERTICAL_ANGLE);
-    cannonHorizontalRotation = constrain(cannonHorizontalRotation, CANNON_MIN_HORIZONTAL_ANGLE, CANNON_MAX_HORIZONTAL_ANGLE);
   }
   
   /**
@@ -222,7 +192,7 @@ public class Cannon
    * how many barrels have been destroyed and the current angle of the cannon. Will not draw in freecam mode.
    * The GUI uses the camera's {@link Camera#applyGUITransformations} method in order to draw properly.
    */
-  private void drawGUI()
+  public void drawGUI()
   {
     if (camera.isFreecam())
     {
@@ -296,6 +266,34 @@ public class Cannon
     popMatrix();
     hint(ENABLE_DEPTH_TEST);
     environment.restoreLights();
+  }
+  
+  /**
+   * Handles the user's input for controlling the cannon. W turns the cannon up, S down,
+   * A turns left, D turns right and left click shoots the cannon.
+   */
+  private void handleUserInput()
+  {
+    if (isKeyDown('w'))
+    {
+      cannonVerticalRotation += deltaTime * 10;
+    }
+    else if (isKeyDown('s'))
+    {
+      cannonVerticalRotation -= deltaTime * 10;
+    }
+    
+    if (isKeyDown('a'))
+    {
+      cannonHorizontalRotation -= deltaTime * 10;
+    }
+    else if (isKeyDown('d'))
+    {
+      cannonHorizontalRotation += deltaTime * 10;
+    }
+    
+    cannonVerticalRotation = constrain(cannonVerticalRotation, CANNON_MIN_VERTICAL_ANGLE, CANNON_MAX_VERTICAL_ANGLE);
+    cannonHorizontalRotation = constrain(cannonHorizontalRotation, CANNON_MIN_HORIZONTAL_ANGLE, CANNON_MAX_HORIZONTAL_ANGLE);
   }
   
   /**
