@@ -22,6 +22,10 @@ public static class PhysicsManager
    */
   private static volatile boolean running = true;
   
+  /**
+   * An instance to the collision manager. This separate class handles the calculation of
+   * collisions for all rigidbodies registered here..
+   */
   private static final CollisionManager COLLISION_MANAGER = new CollisionManager();
   
   /**
@@ -98,12 +102,14 @@ public static class PhysicsManager
     long beforeExecutionTime;
     while (running)
     {
+      // First of all we check whether or not this thread shoult be paused.
       synchronized (PAUSE_LOCK)
       {
         if (paused)
         {
           try
           {
+            // We wait until the pause lock is notified by the main thread.
             PAUSE_LOCK.wait();
           }
           catch (InterruptedException ex)
@@ -112,6 +118,7 @@ public static class PhysicsManager
             Thread.currentThread().interrupt();
           }
           
+          // And if we're paused and not running anymore then we just quit immediately.
           if (!running)
           {
             break;
@@ -149,9 +156,12 @@ public static class PhysicsManager
     }
   }
   
+  /**
+   * Updates all rigidbodies in steps.
+   */
   private static void updateRigidbodies()
   {
-    // First step: Collision. TODO Collision
+    // First step: Collision.
     COLLISION_MANAGER.detectCollisions();
     
     // Second step: integrate the forces of our rigidbodies
@@ -176,11 +186,25 @@ public static class PhysicsManager
  */
 public static class CollisionManager
 {
+  /**
+   * A minimum distance factor for a valid collision.
+   */
   private static final float COLLISION_EPSILON = 1e-4f;
+  
+  /**
+   * The maximum amount of iterations for a single collision check.
+   */
   private static final int MAX_ITERATIONS = 34;
   
+  /**
+   * Whether or not to swap the order of rigidbody collision comparison.
+   */
   private boolean swapOrder = false;
   
+  /**
+   * The main entry point to detect collisions between all registered rigidbodies.
+   * This is an O(n²) operation, comparing every rigidbody to every other rigidbodies.
+   */
   public void detectCollisions()
   {
     synchronized (PhysicsManager.RIGIDBODIES)
@@ -208,6 +232,13 @@ public static class CollisionManager
     }
   }
   
+  /**
+   * Attempts to detect a collision between two rigidbodies using the basis
+   * of xenocollide and the minkowski difference collision algorithm.
+   *
+   * @param first The first rigidbody.
+   * @param second The second rigidbody.
+   */
   private void detectRigidbodyCollision(Rigidbody first, Rigidbody second)
   {
     // I'm not going to implement speculative collision detection since we want to stay
@@ -427,6 +458,14 @@ public static class CollisionManager
     }
   }
   
+  /**
+   * Transforms the given support mapping for a rigidbody to the world orientation of the rigidbody
+   * itself.
+   *
+   * @param rigidbody The rigidbody.
+   * @param direction The direction to transform the support mapping towards.
+   * @returns The transformed support mapping.
+   */
   private PVector supportMapTransformed(
     Rigidbody rigidbody,
     PVector direction)
@@ -445,12 +484,22 @@ public static class CollisionManager
     return result;
   }
   
+  /**
+   * This function handles whenever a collision has been detected. Calculates the impulse applied to
+   * both rigidbodies based on the velocity, angular velocity and point of contact.
+   *
+   * @param first The first rigidbody.
+   * @param second The second rigidbody.
+   * @param point The world position of the collision point.
+   * @param normal The normal direction of the collision.
+   * @param penetration How deep the collision penetrates the surface of the first rigidbody.
+   */
   private void collisionDetected(
     Rigidbody first,
     Rigidbody second,
     PVector point,
     PVector normal,
-    float penetration)
+    @SuppressWarnings("unused") float penetration)
   {
     // Point is global, normal relative to point
     // For implementation, see https://en.wikipedia.org/wiki/Collision_response#Computing_impulse-based_reaction
@@ -478,8 +527,17 @@ public static class CollisionManager
     // Newton's third law here.
     second.addImpulseAtPoint(impulseVector, point);
     first.addImpulseAtPoint(impulseVector.mult(-1), point);
+    
+    second.onHit();
+    first.onHit();
   }
   
+  /**
+   * Swaps two PVector values.
+   *
+   * @param one The first vector.
+   * @param two The second vector.
+   */
   private static void swap(PVector one, PVector two)
   {
     float x = one.x;
@@ -495,30 +553,77 @@ public static class CollisionManager
   }
 }
 
+/**
+ * The collision shape is the base class for any shape used for collision detection.
+ * We define two standardized shapes that define known support mappings and inertia
+ * and mass values.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
 public abstract class CollisionShape
 {
+  /**
+   * The standardized moment of inertia for the given collision shape.
+   */
   protected Matrix3x3 inertia;
+  
+  /**
+   * The mass of this collision shape for when the volume equals to 1.
+   */
   protected float mass;
   
+  /**
+   * Calculates the support mapping as used in the collision detection
+   * algorithm with the provided direction and stores the result
+   * in the provided vector.
+   *
+   * @param direction The direction for the mapping, as well as the resulting value.
+   */
   public abstract void getSupportMapping(PVector direction);
   
+  /**
+   * Calculates the mass and inertia values for the collision shape.
+   */
   public abstract void calculateMassInertia();
   
+  /**
+   * Returns the moment of inertia for the collision shape.
+   *
+   * @returns The moment of inertia.
+   */
   public Matrix3x3 getInertia()
   {
     return inertia;
   }
   
+  /**
+   * Returns the standard mass for this shape.
+   *
+   * @returns The standard mass.
+   */
   public float getMass()
   {
     return mass;
   }
 }
 
+/**
+ * The collision shape for a perfect sphere of a given radius.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
 public class SphereCollisionShape extends CollisionShape
 {
+  /**
+   * The radius of the sphere.
+   */
   private final float radius;
   
+  /**
+   * Constructs the sphere collision shape with the provided radius.
+   *
+   * @param radius The target radius for this shape.
+   */
   public SphereCollisionShape(float radius)
   {
     this.radius = radius;
@@ -543,11 +648,29 @@ public class SphereCollisionShape extends CollisionShape
   }
 }
 
+/**
+ * The collision shape for a perfect cylinder of a given base radius and height.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
 public class CylinderShape extends CollisionShape
 {
+  /**
+   * The height of this cylinder.
+   */
   private final float height;
+  
+  /**
+   * The radius of the base of this cylinder.
+   */
   private final float radius;
   
+  /**
+   * Constructs the cylinder collision shape with the provided height radius.
+   *
+   * @param height The height of this cylinder.
+   * @param radius The target base radius for this cylinder.
+   */
   public CylinderShape(float height, float radius)
   {
     this.height = height;
@@ -591,34 +714,115 @@ public class CylinderShape extends CollisionShape
   }
 }
 
+/**
+ * A 3d rigidbody implementation. Uses moment of inertia, force and torque to calculate its new position
+ * based on a fixed time step interval.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
 public class Rigidbody
 {
-  private static final float GRAVITY_ACCELERATION = 9.81f;
+  /**
+   * The gravitational force for this project.
+   */
+  public static final float GRAVITY_ACCELERATION = 9.81f;
   
-  private final PShape mesh;
+  /**
+   * A list of all shapes attached to this rigidbody.
+   */
+  private final List<PShape> meshes = new CopyOnWriteArrayList<>();
+  
+  /**
+   * The collision shape for this rigidbody.
+   */
   private final CollisionShape collisionShape;
   
+  /**
+   * The global position of this rigidbody.
+   */
   protected final PVector position;
+  
+  /**
+   * The current orientation of this rigidbody represented as a rotation matrix.
+   */
   private final Matrix3x3 orientation = new Matrix3x3();
+  
+  /**
+   * The moment of inertia for the given rigidbody shape.
+   */
   private Matrix3x3 inertia;
+  
+  /**
+   * The inverse of the moment of inertia.
+   */
   private Matrix3x3 inverseInertia;
+  
+  /**
+   * The inverse of the orientation.
+   */
   private Matrix3x3 inverseOrientation = new Matrix3x3();
-  private Matrix3x3 inverseInertiaWorld = new Matrix3x3(); // inverse inertia tensor in world space
   
+  /**
+   * The inverse of the moment of inertia transformed to world space.
+   */
+  private Matrix3x3 inverseInertiaWorld = new Matrix3x3();
+  
+  /**
+   * The current accumulated force to be applied in the next timestep.
+   */
   protected final PVector force = new PVector();
-  protected final PVector torque = new PVector();
-  private final PVector linearVelocity = new PVector();
-  protected final PVector angularVelocity = new PVector();
   
+  /**
+   * The current accumulated torque to be applied in the next timestep.
+   */
+  protected final PVector torque = new PVector();
+  
+  /**
+   * The current linear velocity of this rigidbody.
+   */
+  private final PVector linearVelocity = new PVector();
+  
+  /**
+   * The current angular velocity of this rigidbody.
+   */
+  private final PVector angularVelocity = new PVector();
+  
+  /**
+   * Whether or not this rigidbody is kinematic.
+   */
   private boolean kinematic = true;
+  
+  /**
+   * Whether or not gravity applies to this rigidbody.
+   */
   private boolean gravity = true;
+  
+  /**
+   * The inverse mass of this rigidbody. Stored as the inverse for easier calculations.
+   */
   protected float inverseMass = 1f;
+  
+  /**
+   * The amount of damping per time step on the linear velocity.
+   */
   private float linearDamping = 0f;
+  
+  /**
+   * The amount of damping per time step on the angular velocity.
+   */
   private float angularDamping = 0f;
   
+  /**
+   * Constructs a new rigidbody instance based on the provided mesh, collision shape and
+   * its global position.
+   *
+   * @param mesh The mesh to display at the position/rotation of this rigidbody.
+   * @param collisionShape The target shape of this rigidbody.
+   * @param position The global initial position.
+   */
   public Rigidbody(PShape mesh, CollisionShape collisionShape, PVector position)
   {
-    this.mesh = mesh;
+    meshes.add(mesh);
     this.collisionShape = collisionShape;
     
     this.position = position;
@@ -628,46 +832,101 @@ public class Rigidbody
     inverseMass = 1f / collisionShape.getMass();
   }
   
+  /**
+   * Adds a child mesh to this rigidbody.
+   *
+   * @param mesh The mesh to add.
+   */
+  public void addChildMesh(PShape mesh)
+  {
+    meshes.add(mesh);
+  }
+  
+  /**
+   * Sets whether or not the rigidbody is kinematic and receives updated based on the forces applied.
+   *
+   * @param kinematic Whether or not the rigidbody is kinematic.
+   */
   public void setKinematic(boolean kinematic)
   {
     this.kinematic = kinematic;
   }
   
+  /**
+   * Provides the collision shape of this rigidbody.
+   *
+   * @returns The collision shape.
+   */
   public CollisionShape getCollisionShape()
   {
     return collisionShape;
   }
   
+  /**
+   * Provides the inverse mass of this rigidbody.
+   *
+   * @returns The inverse mass.
+   */
   public float getInverseMass()
   {
     return inverseMass;
   }
   
+  /**
+   * Provides the global position of this rigidbody.
+   *
+   * @returns The global position.
+   */
   public PVector getPosition()
   {
     return position;
   }
   
+  /**
+   * Provides the velocity of this rigidbody.
+   *
+   * @returns The velocity.
+   */
   public PVector getVelocity()
   {
     return linearVelocity;
   }
   
+  /**
+   * Provides the angular velocity of this rigidbody.
+   *
+   * @returns The angular velocity.
+   */
   public PVector getAngularVelocity()
   {
     return angularVelocity;
   }
   
+  /**
+   * Provides the inverse inertia of this rigidbody.
+   *
+   * @returns The inverse inertia.
+   */
   public Matrix3x3 getInverseInertia()
   {
     return inverseInertia;
   }
   
+  /**
+   * Provides the orientation of this rigidbody.
+   *
+   * @returns The orientation.
+   */
   public Matrix3x3 getOrientation()
   {
     return orientation;
   }
   
+  /**
+   * Updates the mass of this rigidbody to the provided value. Will update the moment of inertia as well.
+   *
+   * @param mass The new mass of this rigidbody.
+   */
   public void setMass(float mass)
   {
     inertia = collisionShape.getInertia().mult(mass / collisionShape.getMass());
@@ -675,16 +934,33 @@ public class Rigidbody
     inverseMass = 1f / mass;
   }
   
+  /**
+   * Adds a force to this rigidbody that will be applied in the next time step.
+   *
+   * @param force The force to apply.
+   */
   public synchronized void addForce(PVector force)
   {
     this.force.add(force);
   }
   
+  /**
+   * Adds a torque to this rigidbody that will be applied in the next time step.
+   *
+   * @param torque The torque to apply.
+   */
   public synchronized void addTorque(PVector torque)
   {
     this.torque.add(torque);
   }
   
+  /**
+   * Adds a force to this rigidbody that originates at the provided point in world space.
+   * This results in a torque being applied to this rigidbody.
+   *
+   * @param force The force to apply.
+   * @param point The point in world space where the force originates.
+   */
   public synchronized void addForceAtPoint(PVector force, PVector point)
   {
     this.force.add(force);
@@ -693,6 +969,13 @@ public class Rigidbody
     torque.add(point.cross(force));
   }
   
+  /**
+   * Adds an impulse to this rigidbody that originates at the provided point in world space.
+   * This results in a torque being applied to this rigidbody.
+   *
+   * @param impulse The impulse to apply.
+   * @param point The point in world space where the impulse originates.
+   */
   public synchronized void addImpulseAtPoint(PVector impulse, PVector point)
   {
     linearVelocity.add(PVector.mult(impulse, inverseMass));
@@ -701,22 +984,41 @@ public class Rigidbody
     angularVelocity.add(inverseInertiaWorld.transform(relativePosition.cross(impulse)));
   }
   
+  /**
+   * Transforms a point that is relative to this rigidbody to world space.
+   *
+   * @param localPosition The local position to transform.
+   * @returns A transformed position based on the position and rotation of this rigidbody.
+   */
   public PVector transformLocalPosition(PVector localPosition)
   {
     PVector rotatedPosition = orientation.transform(localPosition);
     return rotatedPosition.add(position);
   }
   
+  /**
+   * Sets the linear damping applied to this rigidbody.
+   *
+   * @param damping The damping factor, between 0 and 1, where 0 means no damping.
+   */
   public void setLinearDamping(float damping)
   {
     linearDamping = damping;
   }
   
+  /**
+   * Sets the angular damping applied to this rigidbody.
+   *
+   * @param damping The damping factor, between 0 and 1, where 0 means no damping.
+   */
   public void setAngularDamping(float damping)
   {
     angularDamping = damping;
   }
   
+  /**
+   * Updates the forces being applied to this rigidbody based on the fixed physics time step.
+   */
   public synchronized void integrateForces()
   {
     // If this rigidbody is fixed in space then we don't need to integrate any forces.
@@ -741,6 +1043,10 @@ public class Rigidbody
     torque.set(0, 0, 0);
   }
   
+  /**
+   * Applies velocity and angular velocity and recalculates any fields that are
+   * specific to the state of our rigidbody.
+   */
   public synchronized void integrate()
   {
     // Handle position
@@ -775,12 +1081,18 @@ public class Rigidbody
     update();
   }
   
+  /**
+   * Update our orientation and world space inertia.
+   */
   public synchronized void update()
   {
     inverseOrientation = orientation.transpose();
     inverseInertiaWorld = inverseOrientation.mult(inverseInertia).mult(orientation);
   }
   
+  /**
+   * Draws all shapes related to this rigidbody at the local position and rotation.
+   */
   public synchronized void draw()
   {
     pushMatrix();
@@ -792,24 +1104,79 @@ public class Rigidbody
     rotateY(-eulerAngles.y);
     rotateZ(eulerAngles.z);
     
-    shape(mesh);
+    for (PShape mesh : meshes)
+    {
+      shape(mesh);
+    }
     
     popMatrix();
   }
+  
+  /**
+   * This method is called whenever a hit is detected on this rigidbody. Does nothing by default.
+   */
+  public void onHit()
+  {
+    // NOP
+  }
 }
 
+/**
+ * A standard implementation of a 3x3 matrix since processing doesn't provide one.
+ * The PMatrix is a 3x4 standard matrix.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
 public class Matrix3x3
 {
+  /**
+   * The top left of the matrix.
+   */
   public float m00;
+  
+  /**
+   * The top center of the matrix.
+   */
   public float m01;
+  
+  /**
+   * The top right of the matrix.
+   */
   public float m02;
+  
+  /**
+   * The center left of the matrix.
+   */
   public float m10;
+  
+  /**
+   * The center of the matrix.
+   */
   public float m11;
+  
+  /**
+   * The center right of the matrix.
+   */
   public float m12;
+  
+  /**
+   * The bottom left of the matrix.
+   */
   public float m20;
+  
+  /**
+   * The bottom center of the matrix.
+   */
   public float m21;
+  
+  /**
+   * The bottom right of the matrix.
+   */
   public float m22;
   
+  /**
+   * Constructs an identity 3x3 matrix.
+   */
   public Matrix3x3()
   {
     m00 = 1f;
@@ -817,11 +1184,19 @@ public class Matrix3x3
     m22 = 1f;
   }
   
+  /**
+   * Sets all values of this matrix to 0.
+   */
   public void clear()
   {
     m00 = m01 = m02 = m10 = m11 = m12 = m20 = m21 = m22 = 0;
   }
   
+  /**
+   * Calculates the determinant of the matrix.
+   *
+   * @returns The determinant.
+   */
   public float determinant()
   {
     return m00 * m11 * m22
@@ -832,6 +1207,12 @@ public class Matrix3x3
       - m22 * m10 * m01;
   }
   
+  /**
+   * Inverts this matrix and returns the result as a new instance.
+   * Assumes that it is invertible.
+   *
+   * @returns The inverted matrix.
+   */
   public Matrix3x3 inverse()
   {
     Matrix3x3 result = new Matrix3x3();
@@ -850,6 +1231,13 @@ public class Matrix3x3
     return result;
   }
   
+  /**
+   * Transfroms the provided position vector according to this matrix.
+   * Treats this matrix as a rotational matrix.
+   *
+   * @param position The position to transform.
+   * @returns The transformed vector according to this rotation.
+   */
   public PVector transform(PVector position)
   {
     return new PVector(
@@ -858,6 +1246,11 @@ public class Matrix3x3
       position.x * m02 + position.y * m12 + position.z * m22);
   }
   
+  /**
+   * Adds the provided matrix to this instance.
+   *
+   * @param other The matrix to add to this one.
+   */
   public void add(Matrix3x3 other)
   {
     m00 += other.m00;
@@ -871,6 +1264,11 @@ public class Matrix3x3
     m22 += other.m22;
   }
   
+  /**
+   * Subtracts the provided matrix from this instance.
+   *
+   * @param other The matrix to subtract from this one.
+   */
   public void sub(Matrix3x3 other)
   {
     m00 -= other.m00;
@@ -884,6 +1282,13 @@ public class Matrix3x3
     m22 -= other.m22;
   }
   
+  /**
+   * Matrix-multiplies this matrix with the provided one and returns the
+   * result as a new instance.
+   *
+   * @param other The matrix to multiply this one with.
+   * @returns A new matrix representing the result of the multiplication.
+   */
   public Matrix3x3 mult(Matrix3x3 other)
   {
     Matrix3x3 target = new Matrix3x3();
@@ -901,6 +1306,13 @@ public class Matrix3x3
     return target;
   }
   
+  /**
+   * Multiplies this matrix with the provided scalar factor and
+   * returns the result as a new instance.
+   *
+   * @param factor The scalar factor to multiply with.
+   * @returns The multiplied matrix.
+   */
   public Matrix3x3 mult(float factor)
   {
     Matrix3x3 target = new Matrix3x3();
@@ -918,6 +1330,11 @@ public class Matrix3x3
     return target;
   }
   
+  /**
+   * Transposes this matrix and returns the result in a new instance.
+   *
+   * @returns The transposed matrix.
+   */
   public Matrix3x3 transpose()
   {
     Matrix3x3 target = new Matrix3x3();
@@ -935,6 +1352,12 @@ public class Matrix3x3
     return target;
   }
   
+  /**
+   * Constructs a rotational matrix based on the provided quaternial representation
+   * of the rotation and stores the result in this instance.
+   *
+   * @param source The quaternion to construct this rotational matrix from.
+   */
   public void fromQuaternion(Quaternion source)
   {
     m00 = 1f - (2f * (source.y * source.y + source.z * source.z));
@@ -948,7 +1371,12 @@ public class Matrix3x3
     m22 = 1f - (2f * (source.y * source.y + source.x * source.x));
   }
   
-  // Quaternion from rotation matrix
+  /**
+   * Constructs a quaternion based on this matrix, assuming it represents
+   * a rotation.
+   *
+   * @returns A quaternial representation of this rotational matrix.
+   */
   public Quaternion toQuaternion()
   {
     float num8 = m00 + m11 + m22;
@@ -990,6 +1418,11 @@ public class Matrix3x3
     }
   }
   
+  /**
+   * Converts this rotational matrix into euler angle representation.
+   *
+   * @returns The euler angles representation of this matrix.
+   */
   public PVector toEulerAngles()
   {
     return new PVector(
@@ -1009,18 +1442,49 @@ public class Matrix3x3
   }
 }
 
+/**
+ * A standard implementation for a quaternion, used in 3D rotations.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
 public class Quaternion
 {
+  /**
+   * The x component of the quaternion.
+   */
   private float x;
+  
+  /**
+   * The y component of the quaternion.
+   */
   private float y;
+  
+  /**
+   * The z component of the quaternion.
+   */
   private float z;
+  
+  /**
+   * The w component of the quaternion.
+   */
   private float w;
   
+  /**
+   * Constructs a new identity quaternion.
+   */
   public Quaternion()
   {
     this(0, 0, 0, 1);
   }
   
+  /**
+   * Constructs a new quaternion given the four components.
+   *
+   * @param x The x component.
+   * @param y The y component.
+   * @param z The z component.
+   * @param w The w component.
+   */
   public Quaternion(float x, float y, float z, float w)
   {
     this.x = x;
@@ -1029,6 +1493,13 @@ public class Quaternion
     this.w = w;
   }
   
+  /**
+   * Multiplies this quaternion with the provided one and returns the result as a new
+   * instance. This is a 3d rotation.
+   *
+   * @param other The quaternion to multiply by.
+   * @returns A new quaternion storing the result.
+   */
   public Quaternion mult(Quaternion other)
   {
     return new Quaternion(
@@ -1038,6 +1509,9 @@ public class Quaternion
       w * other.w - (x * other.x + y * other.y + z * other.z));
   }
   
+  /**
+   * Normalizes this quaternion so the square of all components adds up to 1.
+   */
   public void normalize()
   {
     float inverseLength = 1f / sqrt(x * x + y * y + z * z + w * w);

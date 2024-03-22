@@ -290,6 +290,8 @@ public class Environment
     endShape();
     popMatrix();
     
+    // Render the ocean near plane. Updates all variables to our provided values and then draws the ocean mesh
+    // accordingly to our shader settings.
     shader(oceanNearShader);
     textureWrap(REPEAT);
     oceanNearShader.set("foamTexture", oceanVoronoi);

@@ -3,9 +3,12 @@ import java.util.List;
 import java.util.Random;
 
 PShape barrelShape;
+PShape hitIndicator;
 
 /**
  * Handles the spawning and updating of all barrels in the world.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
  */
 public class BarrelManager
 {
@@ -40,13 +43,25 @@ public class BarrelManager
    */
   private final List<Barrel> barrels = new ArrayList<>();
   
+  /**
+   * The rigidbody mass of a barrel. Default is 2,000kg
+   */
   private float currentBarrelWeight = BARREL_WEIGHT_DEFAULT;
   
+  /**
+   * Constructs the barrel manager with its origin around which the barrels spawn
+   * in a cone.
+   */
   public BarrelManager(PVector origin)
   {
     cannonOrigin = origin;
   }
   
+  /**
+   * Updates the weight of all barrels to the provided amount. Will affect physics.
+   *
+   * @param newWeight the new weight of the barrels in kg.
+   */
   public void setBarrelWeight(float newWeight)
   {
     if (newWeight == 0)
@@ -61,11 +76,19 @@ public class BarrelManager
     }
   }
   
+  /**
+   * Returns the amount of barrels spawned in this world.
+   *
+   * @returns The amount of barrels.
+   */
   public int getBarrelCount()
   {
     return barrels.size();
   }
   
+  /**
+   * Clears all barrels from physics calculations and rendering.
+   */
   public void clearBarrels()
   {
     for (Barrel barrel : barrels)
@@ -76,6 +99,12 @@ public class BarrelManager
     barrels.clear();
   }
   
+  /**
+   * Spawns a given amount of barrels in a cone that is originating from the provided origin
+   * in the BarrelManager's constructor.
+   *
+   * @param amount The amount of barrels to spawn.
+   */
   public void spawnBarrels(int amount)
   {
     // We have an upper limit on attempts if the barrel amount is too large for the area we have.
@@ -95,7 +124,6 @@ public class BarrelManager
         sin(radians(targetYAngle)) * targetDistance);
       targetPosition.add(cannonOrigin);
       
-      // BARREL_MIN_DISTANCE
       // We then check if there's a barrel already close by. If so, we skip this position and try again.
       boolean failedDistanceCheck = false;
       for (Barrel existingBarrel : barrels)
@@ -131,6 +159,9 @@ public class BarrelManager
     }
   }
   
+  /**
+   * Updates and draws all barrels.
+   */
   public void update()
   {
     for (Barrel barrel : barrels)
@@ -149,22 +180,42 @@ public class BarrelManager
  * Essentially we wrap our barrel in a cylinder and then voxilize this cylinder. We then calculate
  * if said voxel is beneath the water surface based on its center position and then apply force
  * accordingly to the barrel. This will then move and rotate the barrel accordingly.
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
  */
 public class Barrel
 {
+  /**
+   * The rigidbody associated with a barrel. Specifically handles buoyancy.
+   */
   private final BarrelRigidbody rigidbody;
   
+  /**
+   * Constructs a new barrel at the given world position with the provided initial weight.
+   *
+   * @param position The position to spawn at.
+   * @param weight The initial weight of the barrel.
+   */
   public Barrel(PVector position, float weight)
   {
     rigidbody = new BarrelRigidbody(position);
     rigidbody.setMass(weight);
   }
   
+  /**
+   * Returns the rigidbody managing this barrel's physics.
+   *
+   * @returns The managing rigidbody.
+   */
   public Rigidbody getRigidbody()
   {
     return rigidbody;
   }
   
+  /**
+   * Draws the barrel. If drawVoxels is enabled, will display the individual voxels used
+   * for the calculation of the buoyancy simulation.
+   */
   public void draw()
   {
     rigidbody.draw();
@@ -172,6 +223,13 @@ public class Barrel
   }
 }
 
+/**
+ * This rigidbody override is specifically designed to calculate the buoyancy forces of a cylindrical
+ * shape. With voxelization adjusted it will support any shape possible.
+ * The forces are calculated using archimedes' law. 
+ *
+ * @author HERE_YOUR_FULL_NAME_TODO
+ */
 public class BarrelRigidbody extends Rigidbody
 {
   /**
@@ -204,6 +262,16 @@ public class BarrelRigidbody extends Rigidbody
    */
   private int validVoxels = 0;
   
+  /**
+   * Whether or not this rigidbody already has been hit by something.
+   */
+  private boolean hit = false;
+  
+  /**
+   * Constructs the rigidbody at the given position and initializes the rigidbody-specific voxelization.
+   *
+   * @param position The initial position.
+   */
   public BarrelRigidbody(PVector position)
   {
     super(barrelShape, new CylinderShape(2, 1), position);
@@ -214,14 +282,21 @@ public class BarrelRigidbody extends Rigidbody
     PhysicsManager.registerRigidbody(this);
   }
   
+  /**
+   * Debug functionality, used to display each voxel individually. This displays the shape
+   * that is used for calculating the forces, with a small reduction in voxel size for displaying
+   * purposes.
+   */
   public synchronized void drawVoxels()
   {
+    // We just iterate through our 3d voxel grid.
     for (int x = 0; x < VOXEL_COUNT; x++)
     {
       for (int y = 0; y < VOXEL_COUNT; y++)
       {
         for (int z = 0; z < VOXEL_COUNT; z++)
         {
+          // Any non-valid voxel isn't used in calculations so we don't display them either.
           if (!voxels[x][y][z].isValid())
           {
             continue;
@@ -229,6 +304,9 @@ public class BarrelRigidbody extends Rigidbody
           
           pushMatrix();
           
+          // We just transform the local position of our voxel to the world position
+          // and translate accordingly. We do however not rotate the voxels since they
+          // aren't rotated for the physics calculations either.
           PVector worldPosition = transformLocalPosition(voxels[x][y][z].getPosition());
           translate(worldPosition.x, worldPosition.y, worldPosition.z);
           box(VOXEL_SIZE - .01f);
@@ -287,7 +365,7 @@ public class BarrelRigidbody extends Rigidbody
           
           // We now calculate the force that we apply to the rigidbody. Hydrostatic pressure
           // cancels out any non-vertical forces, buoyancy is actually just applied upwards.
-          PVector force = new PVector(0, rho * -9.81f * displacement, 0);
+          PVector force = new PVector(0, rho * -GRAVITY_ACCELERATION * displacement, 0);
           
           // And we apply it orientation-based from our voxel position.
           addForceAtPoint(force, worldPosition);
@@ -311,9 +389,30 @@ public class BarrelRigidbody extends Rigidbody
     super.integrateForces();
   }
   
+  @Override
+  public void onHit()
+  {
+    if (hit)
+    {
+      return;
+    }
+    
+    // When we're hit then we display an indicator. It doesn't matter by what thing we're hit, so
+    // chaining barrel hits is also a valid strategy, though arguably a lot harder than just hitting
+    // a barrel with the cannonball.
+    hit = true;
+    addChildMesh(hitIndicator);
+    ui.barrelHit();
+    
+    // We also check if it's game over so we don't eventually have to wait until a cannonball is
+    // being removed. We check game over after we notify the UI of the hit so we can regain
+    // a shot after hitting, even though zero were remaining.
+    ui.checkGameOver();
+  }
+  
   /**
    * Initializes our voxel grid. Voxels are in position relative to the barrel itself, though to scale.
-   * That means that one of the corners of the box we span is at (-100, -100, -100) for example.
+   * That means that one of the corners of the box we span is at (-1, -1, -1) for example.
    */
   private void initializeVoxels()
   {

@@ -55,14 +55,20 @@ public class Cannonball
     rigidbody.addForce(initialImpulse);
   }
   
+  /**
+   * Whether or not a cannonball is valid. Invalidated cannonballs get removed and will not be handled
+   * by physics anymore, saving on resources especially in the collision detection.
+   *
+   * @returns Whether or not this cannonball is valid.
+   */
   public boolean isValid()
   {
     return valid;
   }
   
   /**
-   * Updates the cannonball. Will draw its shape and update the position according to the
-   * gravitational value and current velocity.
+   * Updates the cannonball. Will remove the ball if it is beneath a certain Y level that is beneath the
+   * ocean surface.
    */
   public void update()
   {

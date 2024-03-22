@@ -182,6 +182,7 @@ public class Camera
       togglePaused();
     }
     
+    // CTRL+X will toggl the debug UI where one can modify simulation settings.
     if (isCombinationPressed(CONTROL, 88) || isCombinationPressed(CONTROL, 'x'))
     {
       ui.toggleVisibility();

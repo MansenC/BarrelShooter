@@ -53,46 +53,6 @@ public class Cannon
   private final PShape cannon;
   
   /**
-   * The model for the cannonballs.
-   */
-  private final PShape cannonball;
-  
-  /**
-   * The cannon ruler image.
-   */
-  private final PImage cannonRuler;
-  
-  /**
-   * The icon for the cannon.
-   */
-  private final PImage cannonIcon;
-  
-  /**
-   * The cannon base image.
-   */
-  private final PImage cannonBase;
-  
-  /**
-   * The available bomb image.
-   */
-  private final PImage availableBomb;
-  
-  /**
-   * The used bomb image.
-   */
-  private final PImage usedBomb;
-  
-  /**
-   * The undamaged ship image.
-   */
-  private final PImage undamagedShip;
-  
-  /**
-   * The damaged ship image.
-   */
-  private final PImage damagedShip;
-  
-  /**
    * The current horizontal rotation of the cannon. In range of [-45..45].
    */
   private float cannonHorizontalRotation = 0;
@@ -113,15 +73,16 @@ public class Cannon
     this.position = position;
     cannonWagon = loadShape("CannonWagon.obj");
     cannon = loadShape("Cannon.obj");
-    cannonball = loadShape("Cannonball.obj");
-    
-    cannonRuler = loadImage("game_ruler.png");
-    cannonIcon = loadImage("game_cannon.png");
-    cannonBase = loadImage("game_cannon_base.png");
-    availableBomb = loadImage("game_bomb_available.png");
-    usedBomb = loadImage("game_bomb_used.png");
-    undamagedShip = loadImage("game_ship_nodamage.png");
-    damagedShip = loadImage("game_ship_damage.png");
+  }
+  
+  /**
+   * Returns the vertical rotation of the cannon, used in the UI for displaying purposes.
+   *
+   * @returns The vertical cannon rotation.
+   */
+  public float getCannonVerticalRotation()
+  {
+    return cannonVerticalRotation;
   }
   
   /**
@@ -154,13 +115,14 @@ public class Cannon
     // If the left mouse button was pressed then we shoot a cannonball.
     // We do this here since we don't have to the transformation for spawning
     // the ball inside the barrel again.
-    if (!paused && isMouseButtonPressed(LEFT))
+    if (!paused && isMouseButtonPressed(LEFT) && !ui.isGameCompleted())
     {
       PVector ballSpawnLocation = new PVector(
         modelX(0, 3, 0),
         modelY(0, 3, 0),
         modelZ(0, 3, 0));
       balls.add(new Cannonball(ballSpawnLocation, cannonHorizontalRotation, cannonVerticalRotation));
+      ui.removeBomb();
     }
     
     popMatrix();
@@ -191,90 +153,14 @@ public class Cannon
       }
       
       invalidatedBalls.add(ball);
+      
+      // This check is done here since a ball may have hit a barrel
+      // and is still valid, so checking right after shooting is
+      // a bad idea or otherwise we lose if we only have one shot left.
+      ui.checkGameOver();
     }
     
     balls.removeAll(invalidatedBalls);
-  }
-  
-  /**
-   * Draws the GUI for the cannon game. The GUI includes indicators about how many shots remain,
-   * how many barrels have been destroyed and the current angle of the cannon. Will not draw in freecam mode.
-   * The GUI uses the camera's {@link Camera#applyGUITransformations} method in order to draw properly.
-   */
-  public void drawGUI()
-  {
-    if (camera.isFreecam())
-    {
-      return;
-    }
-    
-    // We disable depth testing and shading so that we always draw
-    // fully lit and on top.
-    hint(DISABLE_DEPTH_TEST);
-    noLights();
-    
-    pushMatrix();
-    camera.applyGUITransformations();
-    
-    for (int i = 0; i < 10; i++)
-    {
-      // Draw the bombs on the left side of the screen so that it takes up half the height,
-      // is centered around Y and has a 10% gap to the left.
-      drawUIImage(
-        availableBomb,
-        width / 10f,
-        height / 4f + (height / 20f) * i,
-        height / 20f,
-        height / 20f);
-    }
-    
-    for (int i = 0; i < 5; i++)
-    {
-      // Draw the ships on the right side of the screen so that it takes up half the height,
-      // is centered around Y and has a 10% gap to the right. Ships are 64x48 so their aspect
-      // ratio is 4:3, which is why the width is multiplied by that.
-      drawUIImage(
-        undamagedShip,
-        width - (7f / 3f) * height / 10f,
-        height / 4f + (height / 10f) * i,
-        (4f / 3f) * height / 10f,
-        height / 10f);
-    }
-    
-    // We then draw the cannon indicator. This one is aligned so that there's 10% margin
-    // to the right of the screen and the same distance to the bottom.
-    drawUIImage(
-      cannonRuler,
-      width - (width / 10f) - (height / 20f),
-      height - (width / 10f) - (height / 20f),
-      height / 7f,
-      height / 7f);
-      
-    pushMatrix();
-    
-    // Modify the transformation so we can freely rotate the indicator like the cannon is being rotated.
-    translate(
-      width - (width / 10f) - (height / 20f) + (2f / 3f) * height / 7f,
-      height - (width / 10f) - (height / 20f) + (2f / 3f) * height / 7f,
-      0);
-    rotateZ(radians(cannonVerticalRotation));
-    
-    // After that pain, we draw it offset so that the middle right edge is centered on the origin.
-    drawUIImage(cannonIcon, -height / 7f, -(1f / 3f) * height / 7f, height / 7f, (2f / 3f) * height / 7f);
-    
-    popMatrix();
-    
-    // Finally we draw the cover.
-    drawUIImage(
-      cannonBase,
-      width - (width / 10f) - (height / 20f) + ((1f / 4f) * height / 7f),
-      height - (width / 10f) - (height / 20f) + ((1f / 4f) * height / 7f),
-      (3f / 4f) * height / 7f,
-      (3f / 4f) * height / 7f);
-    
-    popMatrix();
-    hint(ENABLE_DEPTH_TEST);
-    environment.restoreLights();
   }
   
   /**
@@ -303,29 +189,5 @@ public class Cannon
     
     cannonVerticalRotation = constrain(cannonVerticalRotation, CANNON_MIN_VERTICAL_ANGLE, CANNON_MAX_VERTICAL_ANGLE);
     cannonHorizontalRotation = constrain(cannonHorizontalRotation, CANNON_MIN_HORIZONTAL_ANGLE, CANNON_MAX_HORIZONTAL_ANGLE);
-  }
-  
-  /**
-   * Draws a basic image to the UI, given the image to draw, the x and y coordinates and the width/height
-   * of the image.
-   *
-   * @param image The image to display.
-   * @param x The top left x coordinate.
-   * @param y The top left y coordinate.
-   * @param width The targeted width.
-   * @param height The targeted height.
-   */
-  private void drawUIImage(PImage image, float x, float y, float width, float height)
-  {
-    beginShape();
-    texture(image);
-    
-    // Just a 3D quad width the given parameters.
-    vertex(x, y, 0, 0);
-    vertex(x + width, y, 1, 0);
-    vertex(x + width, y + height, 1, 1);
-    vertex(x, y + height, 0, 1);
-    
-    endShape();
   }
 }

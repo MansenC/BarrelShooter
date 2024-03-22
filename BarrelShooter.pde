@@ -6,13 +6,23 @@ Cannon cannon;
 BarrelManager barrelManager;
 UI ui;
 
+// This is the time of the last frame, as dictated by millis()
 int lastFrameMillis;
+// The deltaTime is in seconds, measured to the last frame.
 float deltaTime;
 
+// These variables are used for pausing, mostly for pausing the physics thread.
 static final Object PAUSE_LOCK = new Object();
 static volatile boolean paused = false;
+
+// We keep the frameTime separate and don't use millis() in order to factor
+// in pauses.
 long frameTime = 0;
 
+/**
+ * Toggles the paused state of the game. Pausing means no updates to the environment or physics
+ * updates.
+ */
 public void togglePaused()
 {
   if (!paused)
@@ -21,6 +31,7 @@ public void togglePaused()
     return;
   }
   
+  // We notify the pause-lock so that the physics thread is woken up from its wait.
   synchronized (PAUSE_LOCK)
   {
     paused = false;
@@ -44,18 +55,20 @@ void setup()
   PhysicsManager.start();
   
   // We initialize everything.
+  ui = new UI();
   camera = new Camera(new PVector(-41.75f, 9.05f, 3.33f));
   environment = new Environment();
   cannon = new Cannon(new PVector(-30, 10.4f, 3.33f));
   barrelManager = new BarrelManager(new PVector(-30, 10.4f, 3.33f));
-  ui = new UI();
   
   camera.setCursorLocked(true);
   
   // Load external global variables :)
   barrelShape = loadShape("Barrel.obj");
+  hitIndicator = loadShape("HitIndicator.obj");
   cannonballShape = loadShape("Cannonball.obj");
   
+  // We finally spawn our barrels.
   barrelManager.spawnBarrels(BARREL_AMOUNT_DEFAULT);
 }
 
@@ -93,9 +106,9 @@ void draw()
   // And then we update our camera, process the input and update the position.
   camera.update();
   
-  // After that we draw the UI. The reason why it's last is simply that
+  // After that we draw the minigame GUI. The reason why it's last is simply that
   // any objects drawn beforehand would get rendered above the UI layer.
-  cannon.drawGUI();
+  ui.drawMinigameGUI();
   
   // Finally we clean up our key and mouse data for this frame.
   framePressedKeys.clear();
@@ -103,6 +116,7 @@ void draw()
   
   // Again, we disable the depth test for the settings UI.
   hint(DISABLE_DEPTH_TEST);
+  noLights();
 }
 
 /**
